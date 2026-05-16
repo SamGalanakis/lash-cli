@@ -1,0 +1,24 @@
+[package]
+name = "lash-export"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+publish = false
+
+[dependencies]
+lash-core = { path = "../lash-core" }
+lash-mode-rlm = { path = "../lash-mode-rlm" }
+lash-sqlite-store = { path = "../lash-sqlite-store" }
+lash-rlm-types = { path = "../lash-rlm-types" }
+anyhow = { workspace = true }
+pulldown-cmark = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[[bin]]
+name = "lash-export"
+path = "src/bin/lash_export.rs"

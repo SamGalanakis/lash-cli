@@ -1,0 +1,21 @@
+[package]
+name = "lash-autoresearch"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+publish = false
+
+[dependencies]
+lash-core = { path = "../lash-core", default-features = false, features = ["full"] }
+lash-tui-extensions = { path = "../lash-tui-extensions" }
+lash = { path = "../lash" }
+lash-tui = { path = "../lash-tui" }
+async-trait = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["fs", "io-util", "process", "sync", "time"] }
+tokio-util = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
