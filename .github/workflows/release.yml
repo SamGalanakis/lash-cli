@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Commit on main to release; blank uses current main
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Validate commit and create tag
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin main --tags
+          sha="$(git rev-parse "${REQUESTED_SHA:-origin/main}^{commit}")"
+          git merge-base --is-ancestor "$sha" origin/main
+          gh run list --workflow ci.yml --commit "$sha" --limit 20 --json conclusion,event,headSha,status \
+            | python3 -c 'import json,sys; s=sys.argv[1]; r=json.load(sys.stdin); assert any(x["headSha"] == s and x["event"] == "push" and x["status"] == "completed" and x["conclusion"] == "success" for x in r)' "$sha"
+          tag="$(git tag --points-at "$sha" --list 'v*' --sort=-v:refname | head -n 1)"
+          if [ -z "$tag" ]; then
+            python3 scripts/release_notes.py collect --require --end "$sha" >/dev/null
+            tag="v$(python3 scripts/release_version.py print-next)"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "$tag" "$sha"
+            git push origin "$tag"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: lash-linux-x86_64.tar.gz
+            linker: ""
+            packages: ""
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            asset: lash-linux-aarch64.tar.gz
+            linker: aarch64-linux-gnu-gcc
+            packages: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+            asset: lash-macos-aarch64.tar.gz
+            linker: ""
+            packages: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - name: Install cross compiler
+        if: runner.os == 'Linux' && matrix.packages != ''
+        run: scripts/ci-install-apt-packages.sh ${{ matrix.packages }}
+      - name: Stamp release version
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: python3 scripts/release_version.py stamp "${RELEASE_TAG#v}"
+      - name: Build release binary
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
+        run: cargo build --release --locked -p lash-cli --features fff-zlob --target ${{ matrix.target }}
+      - name: Package
+        run: scripts/package-release.sh ${{ matrix.target }} ${{ matrix.asset }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: lash-*.tar.gz
+          merge-multiple: true
+      - name: Prepare release files
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          scripts/render-installer.sh "$RELEASE_TAG" dist/install_lash.sh
+          cd dist
+          sha256sum lash-*.tar.gz > SHA256SUMS
+      - name: Collect release notes
+        run: python3 scripts/release_notes.py collect --end "${{ needs.prepare.outputs.tag }}" --out "${{ runner.temp }}/RELEASE_NOTES.md"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          body_path: ${{ runner.temp }}/RELEASE_NOTES.md
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true

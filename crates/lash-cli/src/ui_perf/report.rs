@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use serde::Serialize;
 
-use lash_perf::perf_support::dhat;
-use lash_perf::perf_support::git::git_dirty;
-use lash_perf::perf_support::metrics::{
+use lash_cli_perf::perf_support::dhat;
+use lash_cli_perf::perf_support::git::git_dirty;
+use lash_cli_perf::perf_support::metrics::{
     PercentileMetricSummary as UiPerfMetricSummary, percentile_summary,
 };
-use lash_perf::perf_support::paths;
-use lash_perf::perf_support::report as report_support;
-use lash_perf::perf_support::stack::{DEFAULT_STACK_BUDGET_BYTES, StackProfile};
+use lash_cli_perf::perf_support::paths;
+use lash_cli_perf::perf_support::report as report_support;
+use lash_cli_perf::perf_support::stack::{DEFAULT_STACK_BUDGET_BYTES, StackProfile};
 
 use super::measurement::{UiPerfRunResult, run_once};
 use super::scenarios::{BENCH_HEIGHT, BENCH_WIDTH, UiPerfProfile, UiPerfScenario, UiPerfWorkload};

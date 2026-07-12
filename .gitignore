@@ -1,0 +1,11 @@
+/target/
+/dist/
+/.benchmarks/
+/.lash/
+/.env
+/.env.*
+*.perf
+*.png
+__pycache__/
+*.pyc
+.DS_Store

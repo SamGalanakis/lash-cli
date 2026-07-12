@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-use lash_perf::perf_support::stack::StackProfile;
-use lash_perf::perf_support::time::elapsed_ms;
+use lash_cli_perf::perf_support::stack::StackProfile;
+use lash_cli_perf::perf_support::time::elapsed_ms;
 
 use super::export_cases::run_html_export_once;
 use super::file_index_cases::run_file_index_storm_once;

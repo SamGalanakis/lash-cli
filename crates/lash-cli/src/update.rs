@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use uuid::Uuid;
 
-const DEFAULT_REPO: &str = "SamGalanakis/lash";
+const DEFAULT_REPO: &str = "SamGalanakis/lash-cli";
 const GITHUB_API_BASE: &str = "https://api.github.com";
 const UPDATE_CHECK_INTERVAL_SECS: i64 = 24 * 60 * 60;
 

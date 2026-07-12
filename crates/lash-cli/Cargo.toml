@@ -7,19 +7,14 @@ publish = false
 
 [features]
 default = ["lashlang"]
-dhat-heap = ["dep:dhat", "lash-perf?/dhat-heap"]
+dhat-heap = ["dep:dhat", "lash-cli-perf/dhat-heap"]
 fff-zlob = ["lash-search-tools/fff-zlob"]
 # The reference MCP tool-discovery example (`examples::mcp_discovery`) is RLM-only.
 lashlang = []
 # Optional semantic ranking for the tool-discovery example.
 semantic-tool-search = ["dep:model2vec-rs"]
 test-provider = ["lash-core/testing"]
-# Hidden UI self-benchmark apparatus (`--ui-perf-benchmark`). Gates the
-# `ui_perf` module plus its CLI flags so none compile into the default
-# user-facing build. The runtime benchmark lives in the dev-only
-# `lash-perf` crate; this feature pulls it in for the shared
-# `perf_support` measurement helpers.
-bench = ["dep:lash-perf"]
+bench = ["dep:lash-cli-perf"]
 
 [lib]
 name = "lash_cli"
@@ -33,7 +28,6 @@ path = "src/main.rs"
 lash-core = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
 lash-plugin-mcp = { workspace = true, features = ["lashlang"] }
-lash-perf = { path = "../lash-perf", optional = true }
 lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }
 lash-lashlang-runtime = { workspace = true }
 lash-tool-support = { workspace = true, features = ["lashlang"] }
@@ -55,6 +49,7 @@ lash-tui = { workspace = true }
 lash-autoresearch = { workspace = true }
 lash-export = { workspace = true }
 lash-file-index = { workspace = true }
+lash-cli-perf = { workspace = true, optional = true }
 crossterm = "0.28"
 futures-util = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

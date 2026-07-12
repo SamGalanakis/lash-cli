@@ -4,7 +4,7 @@ use std::time::Instant;
 use lash_export::LoadedSession;
 use lash_export::trace::{LlmCallUsage, LlmPromptSnapshot, RequestMessage};
 
-use lash_perf::perf_support::time::elapsed_ms;
+use lash_cli_perf::perf_support::time::elapsed_ms;
 
 use super::measurement::UiPerfRunResult;
 use super::projection_cases::build_projection_read_view;
