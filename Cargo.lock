@@ -2392,7 +2392,6 @@ dependencies = [
 [[package]]
 name = "lash-search-tools"
 version = "0.0.0-dev"
-source = "git+https://github.com/SamGalanakis/lash?rev=c48c5d3b36d1543eeabdf94ae582462a02b80e34#c48c5d3b36d1543eeabdf94ae582462a02b80e34"
 dependencies = [
  "async-trait",
  "fff-search",
@@ -2403,6 +2402,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-util",
 ]

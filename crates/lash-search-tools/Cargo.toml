@@ -10,6 +10,7 @@ documentation.workspace = true
 readme.workspace = true
 rust-version.workspace = true
 description = "CLI-only fff-backed local search tools for the lash agent runtime."
+publish = false
 keywords = ["lash", "agent", "search", "tools", "cli"]
 categories = ["asynchronous", "development-tools"]
 

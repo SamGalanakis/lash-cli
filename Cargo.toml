@@ -6,6 +6,7 @@ members = [
     "crates/lash-debug-cli-harness",
     "crates/lash-export",
     "crates/lash-file-index",
+    "crates/lash-search-tools",
     "crates/lash-tui",
     "crates/lash-tui-extensions",
 ]
@@ -18,6 +19,8 @@ license = "MIT"
 edition = "2024"
 authors = ["Samuel Galanakis"]
 repository = "https://github.com/SamGalanakis/lash-cli"
+homepage = "https://github.com/SamGalanakis/lash-cli"
+documentation = "https://github.com/SamGalanakis/lash-cli"
 readme = "README.md"
 rust-version = "1.90"
 
@@ -33,6 +36,7 @@ clap = "4"
 futures-util = "0.3"
 pulldown-cmark = "0.13"
 reqwest = { version = "0.13", default-features = false }
+regex = "1"
 schemars = "0.8"
 serde = "1"
 serde_json = "1"
@@ -59,7 +63,6 @@ lash-provider-auth = { git = "https://github.com/SamGalanakis/lash", rev = "c48c
 lash-provider-google = { git = "https://github.com/SamGalanakis/lash", rev = "c48c5d3b36d1543eeabdf94ae582462a02b80e34" }
 lash-provider-openai = { git = "https://github.com/SamGalanakis/lash", rev = "c48c5d3b36d1543eeabdf94ae582462a02b80e34" }
 lash-rlm-types = { git = "https://github.com/SamGalanakis/lash", rev = "c48c5d3b36d1543eeabdf94ae582462a02b80e34" }
-lash-search-tools = { git = "https://github.com/SamGalanakis/lash", rev = "c48c5d3b36d1543eeabdf94ae582462a02b80e34" }
 lash-sqlite-store = { git = "https://github.com/SamGalanakis/lash", rev = "c48c5d3b36d1543eeabdf94ae582462a02b80e34" }
 lash-standard-plugins = { git = "https://github.com/SamGalanakis/lash", rev = "c48c5d3b36d1543eeabdf94ae582462a02b80e34" }
 lash-subagents = { git = "https://github.com/SamGalanakis/lash", rev = "c48c5d3b36d1543eeabdf94ae582462a02b80e34" }
@@ -71,6 +74,7 @@ lash-autoresearch = { path = "crates/lash-autoresearch" }
 lash-cli-perf = { path = "crates/lash-cli-perf" }
 lash-export = { path = "crates/lash-export" }
 lash-file-index = { path = "crates/lash-file-index" }
+lash-search-tools = { path = "crates/lash-search-tools" }
 lash-tui = { path = "crates/lash-tui" }
 lash-tui-extensions = { path = "crates/lash-tui-extensions" }
 
