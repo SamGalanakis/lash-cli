@@ -26,13 +26,13 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Check workspace
-        run: cargo check --workspace --all-targets --locked
+        run: cargo check --workspace --all-targets --features lash-cli/fff-zlob --locked
       - name: Check optional CLI surfaces
         run: cargo check -p lash-cli --features bench,dhat-heap,fff-zlob,test-provider --locked
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --features lash-cli/fff-zlob --locked -- -D warnings
       - name: Test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --features lash-cli/fff-zlob --locked
       - name: Check operator scripts
         run: python3 -m py_compile scripts/*.py
 
@@ -50,6 +50,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
       - uses: Swatinem/rust-cache@v2
       - name: Build release binary
-        run: cargo build --release --locked -p lash-cli --target ${{ matrix.target }}
+        run: cargo build --release --locked -p lash-cli --features fff-zlob --target ${{ matrix.target }}
