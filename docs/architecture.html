@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<title>lash CLI architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700;800&family=Chivo+Mono:wght@400;500&family=Spectral:wght@400;500;600;ital,400&display=swap">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#content">skip to content</a>
+  <section class="opener">
+    <h1 class="opener__title">cli<span class="slash">/</span>architecture</h1>
+    <p class="opener__lede"><code>lash-cli</code> is a Host Application: it selects reusable Lash SDK crates and owns the executable's composition, configuration, presentation, operational policy, and releases.</p>
+    <nav class="doc-links" aria-label="CLI documentation">
+      <a href="./">CLI reference</a>
+      <a href="./publishing.html">Publishing</a>
+      <a href="https://lash.run/architecture/overview.html">Lash SDK architecture</a>
+    </nav>
+  </section>
+  <main class="body" id="content">
+    <section class="section">
+      <div class="section-header">
+        <h2>Ownership boundary</h2>
+        <p>The CLI depends on one reviewed Lash Git revision. Lash exposes runtime, protocol, provider, plugin, persistence, tracing, and language crates. The CLI turns those pieces into a terminal product.</p>
+      </div>
+      <div class="two-col">
+        <article class="panel"><h3>lash-cli owns</h3><p>Argument parsing, setup and stored configuration, provider materialization, concrete plugin wiring, execution-mode selection, TUI state, autonomous JSON/RPC surfaces, session navigation, export, update policy, installer assets, profiling, and binary releases.</p></article>
+        <article class="panel"><h3>Lash owns</h3><p>The reusable runtime and facade, protocol implementations, provider factories, generic tools and plugins, stores, durable process machinery, Lashlang, trace contracts, and embedding documentation.</p></article>
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-header"><h2>Workspace components</h2><p>Every local crate is private to the terminal application unless another consumer justifies promoting a capability into the Lash SDK.</p></div>
+      <div class="def-list-grid">
+        <article class="panel"><h3>lash-cli</h3><p>Binary bootstrap, configuration, providers, plugin composition, commands, session flows, autonomous modes, and terminal application state.</p></article>
+        <article class="panel"><h3>lash-tui</h3><p>Terminal input, frame lifecycle, and rendering primitives.</p></article>
+        <article class="panel"><h3>lash-tui-extensions</h3><p>Host-owned UI extension contracts and activity presentation.</p></article>
+        <article class="panel"><h3>lash-search-tools</h3><p>FFF-backed local search and the optional Lashlang search surface.</p></article>
+        <article class="panel"><h3>lash-file-index</h3><p>Ignore-aware file walking, filesystem notifications, and fuzzy file completion.</p></article>
+        <article class="panel"><h3>lash-export</h3><p>Session-tree HTML and JSON export for CLI persistence and traces.</p></article>
+        <article class="panel"><h3>lash-autoresearch</h3><p>CLI-owned applied workflow plugin and terminal extension.</p></article>
+        <article class="panel"><h3>harness + performance</h3><p>The debug CLI harness and CLI performance helpers exercise product behavior without becoming runtime SDK contracts.</p></article>
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-header"><h2>Composition flow</h2></div>
+      <pre><code>arguments + ~/.lash/config.json
+              │
+              ▼
+provider factories + plugin factories + store
+              │
+              ▼
+        LashCore / LashSession
+              │
+       ┌──────┴────────┐
+       ▼               ▼
+interactive TUI   --print / JSON / RPC</code></pre>
+      <p>Execution modes such as <code>standard</code> and <code>rlm</code> are Lash protocol plugins. The CLI chooses and configures one for a session; it does not implement protocol semantics itself.</p>
+    </section>
+    <section class="section">
+      <div class="section-header"><h2>Dependency rule</h2></div>
+      <p><code>lash-cli</code> may depend on published or Git-pinned Lash SDK crates. Lash must not depend back on CLI crates. A second application that needs CLI-private code is evidence for extracting a focused SDK capability—not for making applications depend on one another.</p>
+    </section>
+  </main>
+  <footer><a href="https://github.com/SamGalanakis/lash-cli">lash-cli source</a> · <a href="https://lash.run/">Lash SDK docs</a></footer>
+</body>
+</html>

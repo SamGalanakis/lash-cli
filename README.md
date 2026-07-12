@@ -7,6 +7,10 @@ The workspace owns the `lash` executable and its private TUI, export, file
 index, autoresearch, and test-harness crates. Lash itself remains an embeddable
 runtime; this repository is one complete host built on top of it.
 
+Documentation: [CLI reference](https://samgalanakis.github.io/lash-cli/) ·
+[architecture](https://samgalanakis.github.io/lash-cli/architecture.html) ·
+[publishing](https://samgalanakis.github.io/lash-cli/publishing.html)
+
 ## Build
 
 ```sh
