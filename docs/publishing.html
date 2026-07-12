@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark light">
+<title>publishing lash CLI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700;800&family=Chivo+Mono:wght@400;500&family=Spectral:wght@400;500;600;ital,400&display=swap">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#content">skip to content</a>
+  <section class="opener">
+    <h1 class="opener__title">cli<span class="slash">/</span>publishing</h1>
+    <p class="opener__lede">CLI releases are manual, reproducible GitHub releases cut only from a green commit on <code>main</code>. They are independent from Lash SDK releases.</p>
+    <nav class="doc-links" aria-label="CLI documentation"><a href="./">CLI reference</a><a href="./architecture.html">Architecture</a></nav>
+  </section>
+  <main class="body" id="content">
+    <section class="section">
+      <div class="section-header"><h2>Release contract</h2></div>
+      <ol>
+        <li>Merge a focused pull request into <code>main</code> after required CI passes.</li>
+        <li>Ensure the releasable commit range contains a <code>Release-Notes:</code> commit section.</li>
+        <li>Dispatch the repository's <strong>Release</strong> workflow. Leave <code>release_sha</code> blank for current <code>main</code>, or provide a green ancestor commit.</li>
+        <li>The workflow validates ancestry and successful push CI, creates the next tag if needed, stamps the binary version, builds every supported target, and publishes the release.</li>
+      </ol>
+      <p>Do not create release tags or upload artifacts by hand.</p>
+    </section>
+    <section class="section">
+      <div class="section-header"><h2>Published assets</h2></div>
+      <div class="two-col">
+        <article class="panel"><h3>Binaries</h3><p><code>lash-linux-x86_64.tar.gz</code>, <code>lash-linux-aarch64.tar.gz</code>, and <code>lash-macos-aarch64.tar.gz</code>.</p></article>
+        <article class="panel"><h3>Integrity + install</h3><p><code>SHA256SUMS</code> covers the binary archives. <code>install_lash.sh</code> is rendered for the exact release tag and installs the matching asset.</p></article>
+      </div>
+    </section>
+    <section class="section">
+      <div class="section-header"><h2>Version relationship</h2></div>
+      <p>The CLI records one exact Lash Git revision in its root <code>Cargo.toml</code>. Updating that revision is an explicit compatibility change with its own checks. CLI and SDK version numbers do not need to advance together.</p>
+    </section>
+  </main>
+  <footer><a href="https://github.com/SamGalanakis/lash-cli/actions/workflows/release.yml">Release workflow</a> · <a href="https://github.com/SamGalanakis/lash-cli/releases">Published releases</a></footer>
+</body>
+</html>
