@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use lash_core::{SessionEvent, TurnEvent};
+use lash_core::{SessionStreamEvent, TurnEvent};
 use lash_tui::ScreenSnapshot;
 use lash_tui_extensions::TuiExtensions;
 use tokio::sync::Mutex;
@@ -123,7 +123,7 @@ impl UiHarness {
         turn
     }
 
-    pub(crate) fn dispatch_event(&mut self, event: SessionEvent) -> &mut Self {
+    pub(crate) fn dispatch_event(&mut self, event: SessionStreamEvent) -> &mut Self {
         let effects = test_session_event_to_turn_event(&event)
             .map(|event| self.ui_extensions.effects_for_turn_event(&event))
             .unwrap_or_default();
@@ -172,14 +172,14 @@ impl UiHarness {
     }
 }
 
-fn test_session_event_to_turn_event(event: &SessionEvent) -> Option<TurnEvent> {
+fn test_session_event_to_turn_event(event: &SessionStreamEvent) -> Option<TurnEvent> {
     match event {
-        SessionEvent::LlmRequest {
+        SessionStreamEvent::LlmRequest {
             protocol_iteration, ..
         } => Some(TurnEvent::ModelRequestStarted {
             protocol_iteration: *protocol_iteration,
         }),
-        SessionEvent::ToolCall {
+        SessionStreamEvent::ToolCall {
             call_id,
             name,
             args,
@@ -194,7 +194,7 @@ fn test_session_event_to_turn_event(event: &SessionEvent) -> Option<TurnEvent> {
             graph_key: None,
             parent_call_id: None,
         }),
-        SessionEvent::PluginEvent { plugin_id, event } => Some(TurnEvent::PluginRuntime {
+        SessionStreamEvent::PluginEvent { plugin_id, event } => Some(TurnEvent::PluginRuntime {
             plugin_id: plugin_id.clone(),
             event: event.clone(),
         }),
@@ -205,7 +205,7 @@ fn test_session_event_to_turn_event(event: &SessionEvent) -> Option<TurnEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{PluginRuntimeEvent, SessionEvent};
+    use lash_core::{PluginRuntimeEvent, SessionStreamEvent};
     use serde_json::json;
 
     fn line_index_containing(lines: &[String], needle: &str) -> Option<usize> {
@@ -217,12 +217,12 @@ mod tests {
         let mut harness = UiHarness::new(50, 14);
         harness.user_turn("write a poem");
         harness.start_turn();
-        harness.dispatch_event(SessionEvent::LlmRequest {
+        harness.dispatch_event(SessionStreamEvent::LlmRequest {
             protocol_iteration: 0,
             message_count: 1,
             tool_list: "read_file, shell".to_string(),
         });
-        harness.dispatch_event(SessionEvent::TextDelta {
+        harness.dispatch_event(SessionStreamEvent::TextDelta {
             content: "A short line.\nAnother line.".to_string(),
         });
 
@@ -265,7 +265,7 @@ mod tests {
     fn ui_harness_renders_inline_ask_panel_end_to_end() {
         let mut harness = UiHarness::new(68, 20);
         harness.user_turn("ask me");
-        harness.dispatch_event(SessionEvent::ToolCall {
+        harness.dispatch_event(SessionStreamEvent::ToolCall {
             call_id: Some("call-1".into()),
             name: "ask".into(),
             args: json!({
@@ -333,7 +333,7 @@ mod tests {
         harness
             .app
             .cache_draft_presentation(PreparedTurn::new("follow up now".into(), Vec::new()));
-        harness.dispatch_event(SessionEvent::InjectedTurnInputAccepted {
+        harness.dispatch_event(SessionStreamEvent::InjectedTurnInputAccepted {
             inputs: vec![lash_core::AcceptedInjectedTurnInput {
                 id: None,
                 message: lash_core::PluginMessage::text(
@@ -343,7 +343,7 @@ mod tests {
             }],
             checkpoint: lash_core::CheckpointKind::AfterWork,
         });
-        harness.dispatch_event(SessionEvent::TextDelta {
+        harness.dispatch_event(SessionStreamEvent::TextDelta {
             content: "I saw the follow up.".into(),
         });
 
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn ui_harness_renders_plugin_panel_and_mode_indicator_end_to_end() {
         let mut harness = UiHarness::new(72, 20);
-        harness.dispatch_event(SessionEvent::PluginEvent {
+        harness.dispatch_event(SessionStreamEvent::PluginEvent {
             plugin_id: "plan_mode".into(),
             event: PluginRuntimeEvent::Custom {
                 name: "plan_mode.state".into(),
@@ -396,19 +396,19 @@ mod tests {
         let mut harness = UiHarness::new(36, 12);
         harness.user_turn("write lines");
         harness.start_turn();
-        harness.dispatch_event(SessionEvent::LlmRequest {
+        harness.dispatch_event(SessionStreamEvent::LlmRequest {
             protocol_iteration: 0,
             message_count: 1,
             tool_list: "read_file".into(),
         });
-        harness.dispatch_event(SessionEvent::TextDelta {
+        harness.dispatch_event(SessionStreamEvent::TextDelta {
             content: (0..10)
                 .map(|idx| format!("line {idx}"))
                 .collect::<Vec<_>>()
                 .join("\n"),
         });
         harness.render();
-        harness.dispatch_event(SessionEvent::TextDelta {
+        harness.dispatch_event(SessionStreamEvent::TextDelta {
             content: (10..18)
                 .map(|idx| format!("\nline {idx}"))
                 .collect::<String>(),
@@ -433,7 +433,7 @@ mod tests {
             .cloned()
             .expect("older visible line after scrolling");
 
-        harness.dispatch_event(SessionEvent::TextDelta {
+        harness.dispatch_event(SessionStreamEvent::TextDelta {
             content: "\nline 18\nline 19".into(),
         });
         let paused = harness.render().visible_lines_trimmed();
@@ -454,7 +454,7 @@ mod tests {
         let mut harness = UiHarness::new(44, 12);
         harness.user_turn("write a very long answer please");
         harness.start_turn();
-        harness.dispatch_event(SessionEvent::LlmRequest {
+        harness.dispatch_event(SessionStreamEvent::LlmRequest {
             protocol_iteration: 0,
             message_count: 1,
             tool_list: String::new(),
@@ -467,7 +467,7 @@ mod tests {
                 .any(|line| line.contains("write a very long answer please"))
         );
 
-        harness.dispatch_event(SessionEvent::TextDelta {
+        harness.dispatch_event(SessionStreamEvent::TextDelta {
             content: "first line\nsecond line\nthird line\nfourth line\nfifth line\nsixth line"
                 .into(),
         });
@@ -481,7 +481,7 @@ mod tests {
             "prompt context should stay visible above first output"
         );
 
-        harness.dispatch_event(SessionEvent::TextDelta {
+        harness.dispatch_event(SessionStreamEvent::TextDelta {
             content: "\nseventh line\neighth line\nninth line\ntenth line".into(),
         });
         let tailed = harness.render().visible_lines_trimmed();

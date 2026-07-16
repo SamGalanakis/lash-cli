@@ -1,7 +1,7 @@
 use super::*;
 use crate::editor::LARGE_PASTE_CHAR_THRESHOLD;
 use async_trait::async_trait;
-use lash_core::{Part, PruneState, SessionEvent, TurnActivity, TurnEvent};
+use lash_core::{Part, PruneState, SessionStreamEvent, TurnActivity, TurnEvent};
 use lash_tui_extensions::{
     SlashCommandSpec, TuiExtension, TuiExtensionContext, TuiExtensions, TuiHostEffect,
 };
@@ -56,28 +56,28 @@ fn part(id: &str, kind: PartKind, content: &str) -> Part {
     }
 }
 
-fn conversation_event(message: Message) -> lash_core::SessionEventRecord {
-    lash_core::SessionEventRecord::Conversation(lash_core::ConversationRecord::from_message(
+fn conversation_event(message: Message) -> lash_core::SessionHistoryRecord {
+    lash_core::SessionHistoryRecord::Conversation(lash_core::ConversationRecord::from_message(
         message,
     ))
 }
 
-fn events_from_messages(messages: &[Message]) -> Vec<lash_core::SessionEventRecord> {
+fn events_from_messages(messages: &[Message]) -> Vec<lash_core::SessionHistoryRecord> {
     messages.iter().cloned().map(conversation_event).collect()
 }
 
 fn test_read_view(
-    events: &[lash_core::SessionEventRecord],
+    events: &[lash_core::SessionHistoryRecord],
     messages: &[Message],
     _tool_calls: &[ToolCallRecord],
 ) -> lash_core::SessionReadView {
     let mut graph = lash_core::SessionGraph::default();
     for event in events {
         match event {
-            lash_core::SessionEventRecord::Conversation(record) => {
+            lash_core::SessionHistoryRecord::Conversation(record) => {
                 graph.append_message(record.to_message());
             }
-            lash_core::SessionEventRecord::Protocol(event) => {
+            lash_core::SessionHistoryRecord::Protocol(event) => {
                 graph.append_protocol_event(event.clone());
             }
         }
@@ -85,7 +85,7 @@ fn test_read_view(
     let event_message_ids = events
         .iter()
         .filter_map(|event| match event {
-            lash_core::SessionEventRecord::Conversation(record) => Some(record.id.as_str()),
+            lash_core::SessionHistoryRecord::Conversation(record) => Some(record.id.as_str()),
             _ => None,
         })
         .collect::<std::collections::HashSet<_>>();
@@ -103,7 +103,7 @@ fn test_read_view(
 }
 
 fn timeline_items_from_test_read_view(
-    events: &[lash_core::SessionEventRecord],
+    events: &[lash_core::SessionHistoryRecord],
     messages: &[Message],
     tool_calls: &[ToolCallRecord],
     ui_state: &UiProjectionState,
@@ -115,7 +115,7 @@ fn timeline_items_from_test_read_view(
 }
 
 fn timeline_from_test_read_view(
-    events: &[lash_core::SessionEventRecord],
+    events: &[lash_core::SessionHistoryRecord],
     messages: &[Message],
     tool_calls: &[ToolCallRecord],
     ui_state: &UiProjectionState,
@@ -125,7 +125,7 @@ fn timeline_from_test_read_view(
 }
 
 fn interrupted_blocks_from_test_read_view(
-    events: &[lash_core::SessionEventRecord],
+    events: &[lash_core::SessionHistoryRecord],
     messages: &[Message],
     tool_calls: &[ToolCallRecord],
     ui_state: &UiProjectionState,

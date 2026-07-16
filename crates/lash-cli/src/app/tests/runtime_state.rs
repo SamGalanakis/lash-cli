@@ -128,7 +128,7 @@ fn plan_exit_tool_call_consumes_pending_prompt_response() {
             .all(|block| !matches!(block, UiTimelineItem::UserInput(_)))
     );
 
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("tc-plan-exit".into()),
         name: "plan_exit".into(),
         args: serde_json::json!({}),
@@ -180,12 +180,12 @@ fn plan_exit_fresh_context_tool_does_not_queue_ui_turn_or_switch() {
 #[test]
 fn non_manual_error_sets_transient_status() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::LlmRequest {
+    app.handle_session_event(SessionStreamEvent::LlmRequest {
         protocol_iteration: 0,
         message_count: 0,
         tool_list: String::new(),
     });
-    app.handle_session_event(SessionEvent::Error {
+    app.handle_session_event(SessionStreamEvent::Error {
         message: "LLM error: Claude request failed with 500".into(),
         envelope: Some(lash_core::session_model::ErrorEnvelope {
             kind: "llm_provider".into(),
@@ -197,7 +197,7 @@ fn non_manual_error_sets_transient_status() {
             provider_failure_kind: None,
         }),
     });
-    app.handle_session_event(SessionEvent::Done);
+    app.handle_session_event(SessionStreamEvent::Done);
 
     assert_eq!(
         app.live.turn.as_ref().map(|turn| turn.run_state),
@@ -215,12 +215,12 @@ fn non_manual_error_sets_transient_status() {
 #[test]
 fn retry_status_stays_visible_when_retry_request_starts() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::LlmRequest {
+    app.handle_session_event(SessionStreamEvent::LlmRequest {
         protocol_iteration: 0,
         message_count: 0,
         tool_list: String::new(),
     });
-    app.handle_session_event(SessionEvent::RetryStatus {
+    app.handle_session_event(SessionStreamEvent::RetryStatus {
         wait_seconds: 2,
         attempt: 2,
         max_attempts: 4,
@@ -240,7 +240,7 @@ fn retry_status_stays_visible_when_retry_request_starts() {
         Some("in 2s · attempt 2/4 · Codex returned non-SSE body but it could not be read")
     );
 
-    app.handle_session_event(SessionEvent::LlmRequest {
+    app.handle_session_event(SessionStreamEvent::LlmRequest {
         protocol_iteration: 0,
         message_count: 0,
         tool_list: String::new(),
@@ -262,16 +262,16 @@ fn retry_status_stays_visible_when_retry_request_starts() {
 #[test]
 fn transient_status_expires_on_tick() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::LlmRequest {
+    app.handle_session_event(SessionStreamEvent::LlmRequest {
         protocol_iteration: 0,
         message_count: 0,
         tool_list: String::new(),
     });
-    app.handle_session_event(SessionEvent::Error {
+    app.handle_session_event(SessionStreamEvent::Error {
         message: "runtime error".into(),
         envelope: None,
     });
-    app.handle_session_event(SessionEvent::Done);
+    app.handle_session_event(SessionStreamEvent::Done);
 
     if let Some(turn) = app.live.turn.as_mut() {
         turn.transient_until = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
@@ -374,7 +374,7 @@ fn accepted_injected_turn_input_renders_matching_draft_presentation() {
     let turn = PreparedTurn::new("follow up".into(), Vec::new());
     app.cache_draft_presentation(turn.clone());
 
-    app.handle_session_event(SessionEvent::InjectedTurnInputAccepted {
+    app.handle_session_event(SessionStreamEvent::InjectedTurnInputAccepted {
         inputs: vec![lash_core::AcceptedInjectedTurnInput {
             id: None,
             message: PluginMessage::text(MessageRole::User, "follow up"),
@@ -400,7 +400,7 @@ fn accepted_injected_turn_input_matches_by_runtime_content_even_when_display_tex
     turn.input_metadata.effective_text = turn.effective_text.clone();
     app.cache_draft_presentation(turn.clone());
 
-    app.handle_session_event(SessionEvent::InjectedTurnInputAccepted {
+    app.handle_session_event(SessionStreamEvent::InjectedTurnInputAccepted {
         inputs: vec![lash_core::AcceptedInjectedTurnInput {
             id: None,
             message: PluginMessage::text(
@@ -427,7 +427,7 @@ fn accepted_injected_turn_input_prefers_draft_id_over_content_match() {
     app.cache_draft_presentation(first.clone());
     app.cache_draft_presentation(accepted.clone());
 
-    app.handle_session_event(SessionEvent::InjectedTurnInputAccepted {
+    app.handle_session_event(SessionStreamEvent::InjectedTurnInputAccepted {
         inputs: vec![lash_core::AcceptedInjectedTurnInput {
             id: Some(accepted_id),
             message: PluginMessage::text(MessageRole::User, "runtime accepted content"),
@@ -500,7 +500,7 @@ fn turn_submission_route_blocks_when_runtime_is_switching() {
 fn accepted_injected_turn_input_without_pending_match_still_renders_once() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
 
-    app.handle_session_event(SessionEvent::InjectedTurnInputAccepted {
+    app.handle_session_event(SessionStreamEvent::InjectedTurnInputAccepted {
         inputs: vec![lash_core::AcceptedInjectedTurnInput {
             id: None,
             message: PluginMessage {
@@ -514,7 +514,7 @@ fn accepted_injected_turn_input_without_pending_match_still_renders_once() {
         checkpoint: lash_core::CheckpointKind::AfterWork,
     });
 
-    app.handle_session_event(SessionEvent::InjectedMessagesCommitted {
+    app.handle_session_event(SessionStreamEvent::InjectedMessagesCommitted {
         messages: vec![PluginMessage {
             role: MessageRole::User,
             content: "runtime content".into(),
@@ -545,7 +545,7 @@ fn accepted_injected_turn_input_removes_matching_draft_without_popping_wrong_one
         Vec::new(),
     ));
 
-    app.handle_session_event(SessionEvent::InjectedTurnInputAccepted {
+    app.handle_session_event(SessionStreamEvent::InjectedTurnInputAccepted {
         inputs: vec![lash_core::AcceptedInjectedTurnInput {
             id: None,
             message: PluginMessage::text(MessageRole::User, "uhh do not switch nvm"),
@@ -571,10 +571,10 @@ fn injected_messages_committed_do_not_duplicate_user_input_after_assistant_work(
 
     // Assistant streams some prose, then runs a tool — this pushes an
     // AssistantText and an Activity block in front of the original UserInput.
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "You're right.".into(),
     });
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         name: "fs_read".into(),
         args: serde_json::json!({"path": "crates/lash/src/plugin.rs"}),
         output: lash_core::ToolCallOutput::success(serde_json::json!({"output": "..."})),
@@ -583,7 +583,7 @@ fn injected_messages_committed_do_not_duplicate_user_input_after_assistant_work(
     });
 
     // Now the late commit arrives.
-    app.handle_session_event(SessionEvent::InjectedMessagesCommitted {
+    app.handle_session_event(SessionStreamEvent::InjectedMessagesCommitted {
         messages: vec![PluginMessage::text(
             MessageRole::User,
             "Why are you still dillydallying",
@@ -614,7 +614,7 @@ fn injected_messages_committed_do_not_duplicate_existing_visible_user_input() {
     app.push_prepared_user_input(&turn);
     app.cache_draft_presentation(turn.clone());
 
-    app.handle_session_event(SessionEvent::InjectedMessagesCommitted {
+    app.handle_session_event(SessionStreamEvent::InjectedMessagesCommitted {
         messages: vec![PluginMessage::text(
             MessageRole::User,
             "(I want future migrations to work though!)",
@@ -1180,7 +1180,7 @@ fn option_prompt_response_falls_back_to_user_block_without_inline_panel() {
     let response = app.take_prompt_response();
     assert_eq!(response.as_deref(), Some("1. red"));
 
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: None,
         name: "search_tools".into(),
         args: serde_json::json!({ "query": "queue" }),
@@ -1220,7 +1220,7 @@ fn option_prompt_response_is_rendered_inline_by_question_panel_artifact() {
         Some("2. blue\n\nNote: ship the blue path")
     );
 
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: None,
         name: "ask".into(),
         args: serde_json::json!({

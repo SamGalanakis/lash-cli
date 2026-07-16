@@ -227,7 +227,7 @@ fn stop_turn_marks_idle_redraw_dirty() {
 #[test]
 fn text_delta_accumulates_raw() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "\n\nfirst\n".into(),
     });
     assert_eq!(
@@ -235,7 +235,7 @@ fn text_delta_accumulates_raw() {
         Some("first")
     );
 
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "\n\n\nsecond\n".into(),
     });
     assert_eq!(
@@ -247,10 +247,10 @@ fn text_delta_accumulates_raw() {
 #[test]
 fn text_delta_code_fence_preserved() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "text\n\n```python\n".into(),
     });
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "# comment\n".into(),
     });
     // The newline between ```python and # comment must be preserved
@@ -267,7 +267,7 @@ fn text_delta_stays_in_live_assistant_until_committed() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
 
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "Draft answer".into(),
     });
 
@@ -281,16 +281,16 @@ fn text_delta_stays_in_live_assistant_until_committed() {
 #[test]
 fn text_delta_updates_live_token_estimate() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::LlmRequest {
+    app.handle_session_event(SessionStreamEvent::LlmRequest {
         protocol_iteration: 0,
         message_count: 0,
         tool_list: String::new(),
     });
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "abcd".into(),
     });
     assert_eq!(app.usage.live_output_tokens_estimate, 1);
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "efgh".into(),
     });
     assert_eq!(app.usage.live_output_tokens_estimate, 2);
@@ -299,12 +299,12 @@ fn text_delta_updates_live_token_estimate() {
 #[test]
 fn first_text_delta_switches_thinking_to_responding() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::LlmRequest {
+    app.handle_session_event(SessionStreamEvent::LlmRequest {
         protocol_iteration: 0,
         message_count: 0,
         tool_list: String::new(),
     });
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "hello".into(),
     });
     assert_eq!(
@@ -323,7 +323,7 @@ fn first_text_delta_switches_thinking_to_responding() {
 #[test]
 fn llm_request_sets_plain_thinking_status() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::LlmRequest {
+    app.handle_session_event(SessionStreamEvent::LlmRequest {
         protocol_iteration: 0,
         message_count: 0,
         tool_list: String::new(),
@@ -344,17 +344,17 @@ fn llm_request_sets_plain_thinking_status() {
 #[test]
 fn llm_request_flushes_intermediate_stream_text() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "Let me continue testing.".into(),
     });
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("tc1".into()),
         name: "read_file".into(),
         args: serde_json::json!({"path":"src/main.rs"}),
         output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
         duration_ms: 1,
     });
-    app.handle_session_event(SessionEvent::LlmRequest {
+    app.handle_session_event(SessionStreamEvent::LlmRequest {
         protocol_iteration: 1,
         message_count: 0,
         tool_list: String::new(),
@@ -371,10 +371,10 @@ fn tool_call_flushes_intermediate_stream_text_immediately() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.timeline.truncate(0);
 
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "I’m checking the rendering path first.".into(),
     });
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("tc2".into()),
         name: "read_file".into(),
         args: serde_json::json!({"path":"crates/lash-cli/src/app/mod.rs"}),
@@ -399,7 +399,7 @@ fn tool_call_started_renders_running_activity_until_completion() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.timeline.truncate(0);
 
-    app.handle_session_event(SessionEvent::ToolCallStart {
+    app.handle_session_event(SessionStreamEvent::ToolCallStart {
         call_id: Some("tc-running".into()),
         name: "read_file".into(),
         args: serde_json::json!({"path":"README.md"}),
@@ -418,7 +418,7 @@ fn tool_call_started_renders_running_activity_until_completion() {
         ),
     }
 
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("tc-running".into()),
         name: "read_file".into(),
         args: serde_json::json!({"path":"README.md"}),
@@ -443,11 +443,11 @@ fn tool_call_started_renders_running_activity_until_completion() {
 #[test]
 fn token_usage_resets_live_token_estimate() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "abcdefgh".into(),
     });
     assert!(app.usage.live_output_tokens_estimate > 0);
-    app.handle_session_event(SessionEvent::TokenUsage {
+    app.handle_session_event(SessionStreamEvent::TokenUsage {
         protocol_iteration: 0,
         usage: TokenUsage {
             input_tokens: 10,
@@ -472,12 +472,12 @@ fn token_usage_resets_live_token_estimate() {
 #[test]
 fn input_only_streamed_usage_keeps_live_output_estimate() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "abcdefgh".into(),
     });
     let live_estimate = app.usage.live_output_tokens_estimate;
     assert!(live_estimate > 0);
-    app.handle_session_event(SessionEvent::TokenUsage {
+    app.handle_session_event(SessionStreamEvent::TokenUsage {
         protocol_iteration: 0,
         usage: TokenUsage {
             input_tokens: 10,
@@ -503,7 +503,7 @@ fn input_only_streamed_usage_keeps_live_output_estimate() {
 fn tool_output_renders_during_generic_running_turn() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "started git status --short\n".into(),
         kind: "tool_output".into(),
     });
@@ -519,13 +519,13 @@ fn tool_output_carriage_return_rewrites_partial_line() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
 
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "Compiling alpha".into(),
         kind: "tool_output".into(),
     });
     assert_eq!(app.live.tool_output.partial, "Compiling alpha");
 
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "\rCompiling beta".into(),
         kind: "tool_output".into(),
     });
@@ -539,7 +539,7 @@ fn tool_output_crlf_commits_current_line() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
 
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "started cargo check\r\n".into(),
         kind: "tool_output".into(),
     });
@@ -556,7 +556,7 @@ fn tool_output_strips_ansi_escape_sequences_from_live_preview() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
 
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "\u{1b}[33mwarning\u{1b}[0m: check this\n".into(),
         kind: "tool_output".into(),
     });
@@ -573,11 +573,11 @@ fn tool_output_strips_osc_escape_sequences_from_live_preview() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
 
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "\u{1b}]11;?\u{1b}\\".into(),
         kind: "tool_output".into(),
     });
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "done\n".into(),
         kind: "tool_output".into(),
     });
@@ -591,7 +591,7 @@ fn tool_output_tabs_collapse_to_single_spaces_in_live_preview() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
 
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "hash\trefs/tags/v0.2.29\n".into(),
         kind: "tool_output".into(),
     });
@@ -610,7 +610,7 @@ fn tool_output_does_not_change_total_content_height() {
     app.start_turn();
 
     let baseline = app.total_content_height(32, 8);
-    app.handle_session_event(SessionEvent::Message {
+    app.handle_session_event(SessionStreamEvent::Message {
         text: "started git status --short\n".into(),
         kind: "tool_output".into(),
     });
@@ -627,7 +627,7 @@ fn update_plan_panel_lights_up_plan_dock() {
         "dock starts empty before any update_plan event"
     );
 
-    app.handle_session_event(SessionEvent::PluginEvent {
+    app.handle_session_event(SessionStreamEvent::PluginEvent {
         plugin_id: "update_plan".into(),
         event: lash_core::PluginRuntimeEvent::Custom {
             name: "update_plan.snapshot".into(),
@@ -662,7 +662,7 @@ fn rlm_budget_warning_uses_status_not_user_message() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.timeline = vec![UiTimelineItem::AssistantText("working".into())].into();
 
-    app.handle_session_event(SessionEvent::PluginEvent {
+    app.handle_session_event(SessionStreamEvent::PluginEvent {
         plugin_id: "rlm_protocol".into(),
         event: lash_core::PluginRuntimeEvent::Status {
             key: "rlm_context_budget_warning".into(),
@@ -689,7 +689,7 @@ fn rlm_budget_warning_uses_status_not_user_message() {
 fn plan_protocol_state_events_upsert_and_clear_blocks() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
-    app.handle_session_event(SessionEvent::PluginEvent {
+    app.handle_session_event(SessionStreamEvent::PluginEvent {
         plugin_id: "plan_mode".into(),
         event: lash_core::PluginRuntimeEvent::Custom {
             name: "plan_mode.state".into(),
@@ -713,7 +713,7 @@ fn plan_protocol_state_events_upsert_and_clear_blocks() {
             .is_some_and(|turn| turn.has_visible_output)
     );
 
-    app.handle_session_event(SessionEvent::PluginEvent {
+    app.handle_session_event(SessionStreamEvent::PluginEvent {
         plugin_id: "plan_mode".into(),
         event: lash_core::PluginRuntimeEvent::Custom {
             name: "plan_mode.state".into(),
@@ -736,7 +736,7 @@ fn cancelled_error_renders_as_system_message() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
     app.note_manual_interrupt_requested();
-    app.handle_session_event(SessionEvent::Error {
+    app.handle_session_event(SessionStreamEvent::Error {
         message: "LLM error: cancelled".into(),
         envelope: Some(lash_core::session_model::ErrorEnvelope {
             kind: "llm_provider".into(),
@@ -761,7 +761,7 @@ fn cancelled_error_renders_as_system_message() {
 fn cancelled_error_without_manual_request_still_stops_immediately() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
-    app.handle_session_event(SessionEvent::Error {
+    app.handle_session_event(SessionStreamEvent::Error {
         message: "LLM error: cancelled".into(),
         envelope: Some(lash_core::session_model::ErrorEnvelope {
             kind: "llm_provider".into(),
@@ -786,7 +786,7 @@ fn cancelled_error_without_manual_request_still_stops_immediately() {
 fn repeated_cancelled_errors_do_not_duplicate_system_message() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.start_turn();
-    let cancelled = SessionEvent::Error {
+    let cancelled = SessionStreamEvent::Error {
         message: "LLM error: cancelled".into(),
         envelope: Some(lash_core::session_model::ErrorEnvelope {
             kind: "llm_provider".into(),
@@ -1014,7 +1014,7 @@ fn scroll_down_to_bottom_reenables_tail_follow_instead_of_contextual_anchor() {
     app.start_turn();
     app.follow_mode = FollowOutputMode::PinnedTurnStart;
 
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: (0..20)
             .map(|idx| format!("line {idx}"))
             .collect::<Vec<_>>()
@@ -1055,7 +1055,7 @@ fn text_delta_does_not_force_scroll_when_follow_output_is_manual() {
     app.follow_mode = FollowOutputMode::Manual;
     app.scroll_offset = 3;
 
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "streamed output".into(),
     });
 
@@ -1111,7 +1111,7 @@ fn text_delta_reveals_message_start_before_switching_to_tail_follow() {
     app.start_turn();
     app.follow_mode = FollowOutputMode::PinnedTurnStart;
 
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: (0..20)
             .map(|idx| format!("line {idx}"))
             .collect::<Vec<_>>()
@@ -1167,14 +1167,14 @@ fn handle_tool_call_merges_contiguous_exploration_activity() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.timeline.truncate(0);
 
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("tc3".into()),
         name: "grep".into(),
         args: serde_json::json!({"query": "ctx"}),
         output: lash_core::ToolCallOutput::success(serde_json::json!("match")),
         duration_ms: 10,
     });
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("tc4".into()),
         name: "read_file".into(),
         args: serde_json::json!({"path": "crates/lash-cli/src/render/mod.rs"}),
@@ -1214,7 +1214,7 @@ fn handle_tool_call_merges_contiguous_edit_activity() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.timeline.truncate(0);
 
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("tc5".into()),
         name: "edit".into(),
         args: serde_json::json!({"path": "a.rs"}),
@@ -1230,7 +1230,7 @@ fn handle_tool_call_merges_contiguous_edit_activity() {
         })),
         duration_ms: 7,
     });
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("tc6".into()),
         name: "edit".into(),
         args: serde_json::json!({"path": "b.rs"}),
@@ -1268,7 +1268,7 @@ fn live_batch_tool_children_render_from_events_without_parent_batch_block() {
     app.timeline.truncate(0);
 
     // The batch container renders nothing on its own.
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("batch-0".into()),
         name: "batch".into(),
         args: serde_json::json!({ "tool_calls": [] }),
@@ -1277,14 +1277,14 @@ fn live_batch_tool_children_render_from_events_without_parent_batch_block() {
     });
     // Its children surface as their own tool events and render directly, with
     // no batch arg/result re-parsing.
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("batch-0:00".into()),
         name: "read_file".into(),
         args: serde_json::json!({ "path": "README.md" }),
         output: lash_core::ToolCallOutput::success(serde_json::json!("README body")),
         duration_ms: 8,
     });
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         call_id: Some("batch-0:01".into()),
         name: "grep".into(),
         args: serde_json::json!({ "query": "OpenAI", "path": "README.md" }),

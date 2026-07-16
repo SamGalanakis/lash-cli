@@ -15,7 +15,8 @@
 //! anywhere else in the CLI.
 
 use lash_core::{
-    ModelCapability, ReasoningCapability, ReasoningDisableEncoding, ReasoningEncoding,
+    CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
+    ReasoningEncoding,
 };
 
 /// How a rule matches a model id. `full` is the lowercased model id as
@@ -78,6 +79,7 @@ struct Row {
     aliases: &'static [(&'static str, &'static str)],
     encoding: Encoding,
     disable: Option<DisableEncoding>,
+    cache_control: Option<CacheControlDialect>,
 }
 
 impl Row {
@@ -111,6 +113,8 @@ impl Row {
                 }),
                 mandatory: false,
             }),
+            cache_control: self.cache_control,
+            stream_termination: None,
         }
     }
 }
@@ -131,6 +135,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Native),
+        cache_control: None,
     },
     Row {
         kind: "anthropic",
@@ -140,6 +145,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Native),
+        cache_control: None,
     },
     Row {
         kind: "anthropic",
@@ -149,6 +155,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Native),
+        cache_control: None,
     },
     // Budget fallback disables by explicitly omitting the thinking block.
     Row {
@@ -159,6 +166,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Budget(&[("low", 1024), ("medium", 4096), ("high", 12288)]),
         disable: Some(DisableEncoding::Omit),
+        cache_control: None,
     },
     // ── google_oauth ──
     Row {
@@ -169,6 +177,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Budget(&[("high", 16000), ("max", 24576)]),
         disable: Some(DisableEncoding::Budget(0)),
+        cache_control: None,
     },
     // gemini-3.1 must precede gemini-3 so `gemini-3.1-pro-preview` matches here.
     Row {
@@ -179,6 +188,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: None,
+        cache_control: None,
     },
     Row {
         kind: "google_oauth",
@@ -188,6 +198,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: None,
+        cache_control: None,
     },
     // ── openai (direct Responses API) ──
     // Prefixes match the prefix-stripped id. gpt-5.2/5.3/5.4 drop `minimal`
@@ -200,6 +211,7 @@ const ROWS: &[Row] = &[
         aliases: &[("minimal", "low")],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     Row {
         kind: "openai",
@@ -209,6 +221,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     Row {
         kind: "openai",
@@ -218,6 +231,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     // ── openai-compatible (OpenRouter base URL) ──
     Row {
@@ -228,6 +242,7 @@ const ROWS: &[Row] = &[
         aliases: &[("minimal", "low")],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     Row {
         kind: "openai-compatible",
@@ -237,6 +252,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     Row {
         kind: "openai-compatible",
@@ -246,6 +262,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: Some(CacheControlDialect::Anthropic),
     },
     Row {
         kind: "openai-compatible",
@@ -255,6 +272,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: Some(CacheControlDialect::Gemini),
     },
     // ── codex (OAuth route; only gpt-5* models) ──
     // Exact gpt-5.5 first, then codex variants, then plain gpt-5 variants.
@@ -267,6 +285,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     Row {
         kind: "codex",
@@ -279,6 +298,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     Row {
         kind: "codex",
@@ -288,6 +308,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     // gpt-5.2/5.3/5.4 drop `minimal` and clamp it to `low`.
     Row {
@@ -301,6 +322,7 @@ const ROWS: &[Row] = &[
         aliases: &[("minimal", "low")],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
     Row {
         kind: "codex",
@@ -310,6 +332,7 @@ const ROWS: &[Row] = &[
         aliases: &[],
         encoding: Encoding::Effort,
         disable: Some(DisableEncoding::Effort("none")),
+        cache_control: None,
     },
 ];
 
@@ -322,7 +345,7 @@ fn builtin_capability_override(_kind: &str, _model: &str) -> Option<ModelCapabil
 
 /// Resolve the host-supplied capability for a model on a provider kind. Built-in
 /// overrides win; then the first matching pattern row; no match yields
-/// [`ModelCapability::default`] (no configurable effort).
+/// [`ModelCapability::default`] (no known capabilities).
 pub(crate) fn capability_for(kind: &str, model: &str) -> ModelCapability {
     if let Some(override_capability) = builtin_capability_override(kind, model) {
         return override_capability;
@@ -453,9 +476,21 @@ mod tests {
     fn openai_compatible_claude_defaults_high() {
         let cap = capability_for("openai-compatible", "anthropic/claude-sonnet-4.6");
         assert_eq!(default_effort(&cap).as_deref(), Some("high"));
+        assert_eq!(
+            cap.cache_control,
+            Some(CacheControlDialect::Anthropic),
+            "OpenRouter Claude routes use Anthropic cache-control placement"
+        );
         // gpt substring wins earlier only when present; claude row here.
         let gpt = capability_for("openai-compatible", "openai/gpt-4o");
         assert_eq!(default_effort(&gpt).as_deref(), Some("medium"));
+        assert_eq!(gpt.cache_control, None);
+    }
+
+    #[test]
+    fn openai_compatible_gemini_uses_gemini_cache_control() {
+        let cap = capability_for("openai-compatible", "google/gemini-3-pro");
+        assert_eq!(cap.cache_control, Some(CacheControlDialect::Gemini));
     }
 
     #[test]
