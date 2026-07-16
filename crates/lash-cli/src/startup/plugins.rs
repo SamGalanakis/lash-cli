@@ -136,7 +136,7 @@ pub(super) async fn apply_autonomous_tool_policy(
     session: &lash::LashSession,
 ) -> anyhow::Result<()> {
     let mut snapshot = session.admin().tools().state().await?;
-    retain_autonomous_tools(&mut snapshot);
+    apply_autonomous_tool_membership(&mut snapshot);
     session
         .admin()
         .tools()
@@ -146,8 +146,18 @@ pub(super) async fn apply_autonomous_tool_policy(
     Ok(())
 }
 
-fn retain_autonomous_tools(snapshot: &mut ToolState) {
-    snapshot.retain(|_, entry| autonomous_tool_allowed(&entry.manifest().name));
+fn apply_autonomous_tool_membership(snapshot: &mut ToolState) {
+    let disallowed = snapshot
+        .iter()
+        .filter(|(_, entry)| !autonomous_tool_allowed(&entry.manifest().name))
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+
+    for id in disallowed {
+        snapshot
+            .set_membership(&id, false)
+            .expect("tool id collected from the same snapshot");
+    }
 }
 
 pub(crate) fn cli_prompt_config(autonomous: bool, _execution_mode: &ExecutionMode) -> PromptLayer {
@@ -381,11 +391,16 @@ mod tests {
             ToolRegistry::from_tool_provider(Arc::new(CatalogFixtureProvider)).unwrap();
 
         let mut snapshot = tool_registry.export_state();
-        retain_autonomous_tools(&mut snapshot);
-        assert!(snapshot.contains(&lash_core::ToolId::from("tool:read_file")));
-        assert!(!snapshot.contains(&lash_core::ToolId::from("tool:ask")));
-        assert!(!snapshot.contains(&lash_core::ToolId::from("tool:plan_exit")));
-        assert!(!snapshot.contains(&lash_core::ToolId::from("tool:showcase")));
+        apply_autonomous_tool_membership(&mut snapshot);
+        let is_member = |id| {
+            snapshot
+                .get(&lash_core::ToolId::from(id))
+                .is_some_and(lash_core::ToolStateEntry::is_member)
+        };
+        assert!(is_member("tool:read_file"));
+        assert!(!is_member("tool:ask"));
+        assert!(!is_member("tool:plan_exit"));
+        assert!(!is_member("tool:showcase"));
     }
 
     #[test]

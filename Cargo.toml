@@ -49,26 +49,26 @@ uuid = "1"
 
 # The CLI tracks one reviewed Lash revision. Dependency updates are explicit,
 # testable compatibility changes rather than an implicit lockstep workspace.
-lash = { package = "lash-runtime", git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-core = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-lashlang-runtime = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-llm-tools = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-plugin-mcp = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-plugin-plan-mode = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-plugin-process-controls = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-protocol-rlm = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-protocol-standard = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-provider-anthropic = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-provider-auth = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-provider-google = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-provider-openai = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-rlm-types = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-sqlite-store = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-standard-plugins = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-subagents = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-tool-support = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lash-trace = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
-lashlang = { git = "https://github.com/SamGalanakis/lash", rev = "6c31efb5c4beedb117c3b1e1df3b8439b1cc2935" }
+lash = { package = "lash-runtime", git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-core = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-lashlang-runtime = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-llm-tools = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-plugin-mcp = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-plugin-plan-mode = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-plugin-process-controls = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-protocol-rlm = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-protocol-standard = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-provider-anthropic = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-provider-auth = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-provider-google = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-provider-openai = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-rlm-types = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-sqlite-store = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-standard-plugins = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-subagents = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-tool-support = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash-trace = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lashlang = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
 
 lash-autoresearch = { path = "crates/lash-autoresearch" }
 lash-cli-perf = { path = "crates/lash-cli-perf" }

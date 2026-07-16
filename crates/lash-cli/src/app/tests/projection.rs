@@ -8,7 +8,7 @@ fn finish_turn_from_read_view_rebuilds_current_turn_from_authoritative_state() {
     let turn = PreparedTurn::new("What exists now?".into(), Vec::new());
     app.push_prepared_user_input(&turn);
     app.start_turn();
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "I looked at the actual librarian prompt".into(),
     });
 
@@ -51,7 +51,7 @@ fn finish_turn_from_read_view_preserves_local_system_messages_inside_active_turn
     app.timeline.push(UiTimelineItem::SystemMessage(
         "Session info\nruntime: rlm".into(),
     ));
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "Runtime answer".into(),
     });
 
@@ -119,10 +119,10 @@ fn finish_turn_from_read_view_does_not_duplicate_assistant_text_after_tool_activ
     let turn = PreparedTurn::new("Fix it".into(), Vec::new());
     app.push_prepared_user_input(&turn);
     app.start_turn();
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "I found and fixed the 500.".into(),
     });
-    app.handle_session_event(SessionEvent::ToolCall {
+    app.handle_session_event(SessionStreamEvent::ToolCall {
         name: "update_plan".into(),
         args: serde_json::json!({
             "plan": [
@@ -173,13 +173,13 @@ fn finish_turn_from_read_view_uses_authoritative_reasoning_and_text() {
     let turn = PreparedTurn::new("Write a poem".into(), Vec::new());
     app.push_prepared_user_input(&turn);
     app.start_turn();
-    app.handle_session_event(SessionEvent::ReasoningDelta {
+    app.handle_session_event(SessionStreamEvent::ReasoningDelta {
         content: "Crafting a cool poem".into(),
     });
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "Neon rain on midnight street.".into(),
     });
-    app.handle_session_event(SessionEvent::ReasoningDelta {
+    app.handle_session_event(SessionStreamEvent::ReasoningDelta {
         content: "I see the user wants a cool poem.".into(),
     });
 
@@ -234,13 +234,13 @@ fn live_reasoning_and_prose_deltas_are_committed_chronologically() {
     app.push_prepared_user_input(&turn);
     app.start_turn();
 
-    app.handle_session_event(SessionEvent::ReasoningDelta {
+    app.handle_session_event(SessionStreamEvent::ReasoningDelta {
         content: "first reasoning".into(),
     });
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "visible prose".into(),
     });
-    app.handle_session_event(SessionEvent::ReasoningDelta {
+    app.handle_session_event(SessionStreamEvent::ReasoningDelta {
         content: "second reasoning".into(),
     });
     app.finalize_live_markdown();
@@ -367,7 +367,7 @@ fn rlm_trajectory_reasoning_projects_as_assistant_reasoning() {
     };
     let events = vec![
         conversation_event(assistant.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
     ];
@@ -402,7 +402,7 @@ fn rlm_trajectory_projects_reasoning_prose_code_and_error_in_order() {
     };
     let events = vec![
         conversation_event(assistant.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
     ];
@@ -455,7 +455,7 @@ fn rlm_trajectory_final_output_projects_as_assistant_text() {
     };
     let events = vec![
         conversation_event(assistant.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
     ];
@@ -492,7 +492,7 @@ fn rlm_trajectory_null_final_output_keeps_prose_and_suppresses_final_value() {
     };
     let events = vec![
         conversation_event(assistant.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
     ];
@@ -533,7 +533,7 @@ fn rlm_final_answer_projects_after_reasoning_and_lashlang_code() {
     let events = vec![
         conversation_event(user.clone()),
         conversation_event(assistant_reasoning.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
         conversation_event(assistant.clone()),
@@ -590,7 +590,7 @@ fn finish_turn_replaces_live_final_value_with_projection() {
     };
     let events = vec![
         conversation_event(user.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
     ];
@@ -652,7 +652,7 @@ fn rlm_trajectory_projects_reasoning_and_code_without_hidden_tool_calls() {
     };
     let events = vec![
         conversation_event(assistant.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
     ];
@@ -678,7 +678,7 @@ fn rlm_trajectory_final_output_does_not_inline_hidden_tool_call_projection() {
         error: None,
         final_output: Some(serde_json::json!("Mon May 11 01:51:25 PM CEST 2026")),
     };
-    let events = vec![lash_core::SessionEventRecord::Protocol(
+    let events = vec![lash_core::SessionHistoryRecord::Protocol(
         lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         ),
@@ -711,7 +711,7 @@ fn rlm_activity_journal_projects_tool_rows_after_matching_lashlang_block() {
     };
     let events = vec![
         conversation_event(user.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
     ];
@@ -817,7 +817,7 @@ fn finish_turn_from_read_view_preserves_live_lashlang_tool_activity_from_cli_jou
     };
     let events = vec![
         conversation_event(user.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(entry),
         )),
     ];
@@ -868,11 +868,11 @@ fn rlm_trajectory_steps_project_chronologically_without_hidden_tool_results() {
     let second_reasoning = assistant_reasoning_text_message("a-second", "Then check files.", "");
     let events = vec![
         conversation_event(first_reasoning.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(first),
         )),
         conversation_event(second_reasoning.clone()),
-        lash_core::SessionEventRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
+        lash_core::SessionHistoryRecord::Protocol(lash_protocol_rlm::rlm_protocol_event(
             lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(second),
         )),
         conversation_event(assistant.clone()),
@@ -903,7 +903,7 @@ fn finish_turn_from_read_view_uses_authoritative_transcript_even_when_streamed_t
     let turn = PreparedTurn::new("Shorten it".into(), Vec::new());
     app.push_prepared_user_input(&turn);
     app.start_turn();
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "Visible streamed text".into(),
     });
 
@@ -935,7 +935,7 @@ fn finish_interrupted_turn_from_read_view_preserves_local_system_messages() {
     let turn = PreparedTurn::new("Keep working".into(), Vec::new());
     app.push_prepared_user_input(&turn);
     app.start_turn();
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "Partial answer".into(),
     });
 
@@ -983,7 +983,7 @@ fn cancel_then_queued_turn_uses_read_view_without_preview_duplication() {
     let cancelled_turn = PreparedTurn::new("Cancel this".into(), Vec::new());
     app.push_prepared_user_input(&cancelled_turn);
     app.start_turn();
-    app.handle_session_event(SessionEvent::TextDelta {
+    app.handle_session_event(SessionStreamEvent::TextDelta {
         content: "Cancelled live preview".into(),
     });
 

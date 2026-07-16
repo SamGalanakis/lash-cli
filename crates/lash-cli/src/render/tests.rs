@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 fn timeline_items_from_test_read_view(
-    events: &[lash_core::SessionEventRecord],
+    events: &[lash_core::SessionHistoryRecord],
     messages: &[lash_core::Message],
     _tool_calls: &[lash_core::ToolCallRecord],
     ui_state: &crate::app::UiProjectionState,
@@ -26,10 +26,10 @@ fn timeline_items_from_test_read_view(
     let mut graph = lash_core::SessionGraph::default();
     for event in events {
         match event {
-            lash_core::SessionEventRecord::Conversation(record) => {
+            lash_core::SessionHistoryRecord::Conversation(record) => {
                 graph.append_message(record.to_message());
             }
-            lash_core::SessionEventRecord::Protocol(event) => {
+            lash_core::SessionHistoryRecord::Protocol(event) => {
                 graph.append_protocol_event(event.clone());
             }
         }
@@ -37,7 +37,7 @@ fn timeline_items_from_test_read_view(
     let event_message_ids = events
         .iter()
         .filter_map(|event| match event {
-            lash_core::SessionEventRecord::Conversation(record) => Some(record.id.as_str()),
+            lash_core::SessionHistoryRecord::Conversation(record) => Some(record.id.as_str()),
             _ => None,
         })
         .collect::<std::collections::HashSet<_>>();
@@ -1408,7 +1408,7 @@ fn live_reasoning_compacts_after_activity_appends_below_it() {
         "live reasoning should expand while it is the tail; got {live_text:?}",
     );
 
-    app.handle_session_event(lash_core::SessionEvent::ToolCall {
+    app.handle_session_event(lash_core::SessionStreamEvent::ToolCall {
         call_id: None,
         name: "read_file".into(),
         args: serde_json::json!({ "path": "crates/lash/src/provider.rs" }),
@@ -1452,7 +1452,7 @@ fn committed_reasoning_compacts_while_live_assistant_streams() {
     )]
     .into();
 
-    app.handle_session_event(lash_core::SessionEvent::TextDelta {
+    app.handle_session_event(lash_core::SessionStreamEvent::TextDelta {
         content: "Answer is streaming.".into(),
     });
 
