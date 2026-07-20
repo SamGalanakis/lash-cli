@@ -22,6 +22,82 @@ fn runtime_status_from_plugin_event(
 }
 
 impl App {
+    fn append_model_output(&mut self, lane: ModelOutputLane, text: &str) {
+        match lane {
+            ModelOutputLane::Reasoning => {
+                if text.is_empty() {
+                    return;
+                }
+                self.mark_first_token_arrived();
+                if self.live.assistant.has_renderable_output() {
+                    self.commit_live_assistant_block();
+                }
+                let had_output = self.live.reasoning.has_renderable_output();
+                self.live.reasoning.append(text);
+                if !had_output && self.live.reasoning.has_renderable_output() {
+                    self.mark_visible_output();
+                }
+                self.mark_visible_output();
+                self.scroll_to_bottom();
+            }
+            ModelOutputLane::Assistant => {
+                self.mark_first_token_arrived();
+                self.usage.live_output_chars_estimate += text.chars().count() as i64;
+                self.usage.live_output_tokens_estimate =
+                    live::estimate_tokens_from_char_count(self.usage.live_output_chars_estimate);
+                if self.live.reasoning.has_renderable_output() {
+                    self.commit_live_reasoning_block();
+                }
+                let had_output = self.live.assistant.has_renderable_output();
+                self.live.assistant.append(text);
+                if !had_output && self.live.assistant.has_renderable_output() {
+                    self.mark_visible_output();
+                }
+                self.scroll_to_bottom();
+            }
+        }
+    }
+
+    fn reset_model_attempt_output(
+        &mut self,
+        assistant_prose_correlation_ids: &[TurnActivityId],
+        reasoning_correlation_ids: &[TurnActivityId],
+    ) {
+        let matches_reset = |chunk: &ModelOutputChunk| match chunk.lane {
+            ModelOutputLane::Assistant => {
+                assistant_prose_correlation_ids.contains(&chunk.correlation_id)
+            }
+            ModelOutputLane::Reasoning => reasoning_correlation_ids.contains(&chunk.correlation_id),
+        };
+        if !self.live.model_output_chunks.iter().any(matches_reset) {
+            return;
+        }
+
+        let retained = self
+            .live
+            .model_output_chunks
+            .iter()
+            .filter(|chunk| !matches_reset(chunk))
+            .cloned()
+            .collect::<Vec<_>>();
+        self.timeline.truncate(
+            self.live
+                .model_output_timeline_start
+                .min(self.timeline.len()),
+        );
+        self.live.assistant.clear();
+        self.live.reasoning.clear();
+        self.usage.live_output_chars_estimate = 0;
+        self.usage.live_output_tokens_estimate = 0;
+        self.invalidate_height_cache();
+
+        for chunk in &retained {
+            self.append_model_output(chunk.lane, &chunk.text);
+        }
+        self.live.model_output_chunks = retained;
+        self.scroll_to_bottom();
+    }
+
     fn activity_renders_prompt_response_inline(activity: &ActivityBlock) -> bool {
         matches!(
             activity.result.artifact,
@@ -155,35 +231,29 @@ impl App {
     pub fn handle_turn_activity(&mut self, activity: TurnActivity) {
         match activity.event {
             TurnEvent::ReasoningDelta { text } => {
-                if text.is_empty() {
-                    return;
-                }
-                self.mark_first_token_arrived();
-                if self.live.assistant.has_renderable_output() {
-                    self.commit_live_assistant_block();
-                }
-                let had_output = self.live.reasoning.has_renderable_output();
-                self.live.reasoning.append(&text);
-                if !had_output && self.live.reasoning.has_renderable_output() {
-                    self.mark_visible_output();
-                }
-                self.mark_visible_output();
-                self.scroll_to_bottom();
+                self.live.model_output_chunks.push(ModelOutputChunk {
+                    correlation_id: activity.correlation_id,
+                    lane: ModelOutputLane::Reasoning,
+                    text: text.clone(),
+                });
+                self.append_model_output(ModelOutputLane::Reasoning, &text);
             }
             TurnEvent::AssistantProseDelta { text } => {
-                self.mark_first_token_arrived();
-                self.usage.live_output_chars_estimate += text.chars().count() as i64;
-                self.usage.live_output_tokens_estimate =
-                    live::estimate_tokens_from_char_count(self.usage.live_output_chars_estimate);
-                if self.live.reasoning.has_renderable_output() {
-                    self.commit_live_reasoning_block();
-                }
-                let had_output = self.live.assistant.has_renderable_output();
-                self.live.assistant.append(&text);
-                if !had_output && self.live.assistant.has_renderable_output() {
-                    self.mark_visible_output();
-                }
-                self.scroll_to_bottom();
+                self.live.model_output_chunks.push(ModelOutputChunk {
+                    correlation_id: activity.correlation_id,
+                    lane: ModelOutputLane::Assistant,
+                    text: text.clone(),
+                });
+                self.append_model_output(ModelOutputLane::Assistant, &text);
+            }
+            TurnEvent::ModelAttemptReset {
+                assistant_prose_correlation_ids,
+                reasoning_correlation_ids,
+            } => {
+                self.reset_model_attempt_output(
+                    &assistant_prose_correlation_ids,
+                    &reasoning_correlation_ids,
+                );
             }
             TurnEvent::FinalValue { value } => {
                 self.finalize_live_markdown();
@@ -299,6 +369,8 @@ impl App {
             }
             TurnEvent::ModelRequestStarted { protocol_iteration } => {
                 self.finalize_live_markdown();
+                self.live.model_output_chunks.clear();
+                self.live.model_output_timeline_start = self.timeline.len();
                 self.iteration = protocol_iteration + 1;
                 if let Some(detail) = self.pending_retry_status.take() {
                     self.set_status(CliRunState::Waiting, Some(detail), true);

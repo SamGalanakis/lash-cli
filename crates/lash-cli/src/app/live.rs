@@ -156,6 +156,8 @@ impl App {
         self.iteration = 0;
         self.live.assistant.clear();
         self.live.reasoning.clear();
+        self.live.model_output_chunks.clear();
+        self.live.model_output_timeline_start = self.timeline.len();
         self.clear_live_tool_output();
         self.usage.live_output_chars_estimate = 0;
         self.usage.live_output_tokens_estimate = 0;

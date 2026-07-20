@@ -172,6 +172,7 @@ async fn runtime_error_turn_result(session: &LashSession, message: String) -> la
         execution: ExecutionSummary::default(),
         state,
         outcome: TurnOutcome::Stopped(TurnStop::RuntimeError),
+        cancellation: None,
         assistant_output: AssistantOutput {
             safe_text: String::new(),
             raw_text: String::new(),

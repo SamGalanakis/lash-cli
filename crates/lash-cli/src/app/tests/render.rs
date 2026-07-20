@@ -279,6 +279,52 @@ fn text_delta_stays_in_live_assistant_until_committed() {
 }
 
 #[test]
+fn model_attempt_reset_retracts_failed_streamed_output() {
+    let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
+    app.start_turn();
+    app.handle_turn_activity(TurnActivity::independent(TurnEvent::ModelRequestStarted {
+        protocol_iteration: 0,
+    }));
+    app.handle_turn_activity(TurnActivity::new(
+        lash_core::TurnActivityId::new("failed-reasoning"),
+        TurnEvent::ReasoningDelta {
+            text: "discarded reasoning".into(),
+        },
+    ));
+    app.handle_turn_activity(TurnActivity::new(
+        lash_core::TurnActivityId::new("failed-prose"),
+        TurnEvent::AssistantProseDelta {
+            text: "discarded answer".into(),
+        },
+    ));
+
+    assert!(matches!(
+        app.timeline.last(),
+        Some(UiTimelineItem::AssistantReasoning(text)) if text == "discarded reasoning"
+    ));
+    app.handle_turn_activity(TurnActivity::independent(TurnEvent::ModelAttemptReset {
+        assistant_prose_correlation_ids: vec![lash_core::TurnActivityId::new("failed-prose")],
+        reasoning_correlation_ids: vec![lash_core::TurnActivityId::new("failed-reasoning")],
+    }));
+
+    assert!(app.timeline.is_empty());
+    assert!(app.live.assistant.normalized_text().is_none());
+    assert!(app.live.reasoning.normalized_text().is_none());
+    assert_eq!(app.usage.live_output_tokens_estimate, 0);
+
+    app.handle_turn_activity(TurnActivity::new(
+        lash_core::TurnActivityId::new("successful-prose"),
+        TurnEvent::AssistantProseDelta {
+            text: "final answer".into(),
+        },
+    ));
+    assert_eq!(
+        app.live.assistant.normalized_text().as_deref(),
+        Some("final answer")
+    );
+}
+
+#[test]
 fn text_delta_updates_live_token_estimate() {
     let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
     app.handle_session_event(SessionStreamEvent::LlmRequest {

@@ -265,6 +265,7 @@ async fn observation_test_session(
                 request_body: None,
                 http_summary: None,
                 execution_evidence: None,
+                response_metadata: Default::default(),
             })
         })
         .build()

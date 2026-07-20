@@ -504,6 +504,7 @@ fn accepted_injected_turn_input_without_pending_match_still_renders_once() {
         inputs: vec![lash_core::AcceptedInjectedTurnInput {
             id: None,
             message: PluginMessage {
+                id: None,
                 role: MessageRole::User,
                 content: "runtime content".into(),
                 origin: None,
@@ -516,6 +517,7 @@ fn accepted_injected_turn_input_without_pending_match_still_renders_once() {
 
     app.handle_session_event(SessionStreamEvent::InjectedMessagesCommitted {
         messages: vec![PluginMessage {
+            id: None,
             role: MessageRole::User,
             content: "runtime content".into(),
             origin: None,

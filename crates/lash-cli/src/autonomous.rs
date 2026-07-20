@@ -112,6 +112,7 @@ impl AutonomousRenderer {
             // aligned with the model's final answer.
             TurnEvent::ReasoningDelta { .. } => {}
             TurnEvent::ToolCallStarted { .. }
+            | TurnEvent::ModelAttemptReset { .. }
             | TurnEvent::QueuedWorkStarted { .. }
             | TurnEvent::Usage { .. }
             | TurnEvent::ChildUsage { .. }
@@ -706,6 +707,7 @@ mod tests {
             outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
                 text: "hello".to_string(),
             }),
+            cancellation: None,
             assistant_output: AssistantOutput {
                 safe_text: "hello".to_string(),
                 raw_text: "hello".to_string(),

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::runtime::PendingTurnInput;
 use lash_core::{
     Message, MessageRole, PartKind, PluginMessage, ProcessHandleSummary, ProcessLifecycleStatus,
-    PromptUsage, SessionProcessEventKind, TokenUsage, ToolCallRecord,
+    PromptUsage, SessionProcessEventKind, TokenUsage, ToolCallRecord, TurnActivityId,
 };
 use lash_tui::{Line, Rect};
 use lash_tui_extensions::TuiExtensions;
@@ -533,6 +533,24 @@ pub struct LiveTurnView {
     pub reasoning: LiveMarkdown,
     /// Live tool output preview anchored to the active tool activity block.
     pub tool_output: LiveToolOutput,
+    /// Provider-output chunks for the current model request. Correlation ids
+    /// let a retry retract only the failed attempt's streamed text.
+    model_output_chunks: Vec<ModelOutputChunk>,
+    /// Timeline boundary before the current request began rendering output.
+    model_output_timeline_start: usize,
+}
+
+#[derive(Clone, Copy)]
+enum ModelOutputLane {
+    Assistant,
+    Reasoning,
+}
+
+#[derive(Clone)]
+struct ModelOutputChunk {
+    correlation_id: TurnActivityId,
+    lane: ModelOutputLane,
+    text: String,
 }
 
 impl Default for LiveTurnView {
@@ -542,6 +560,8 @@ impl Default for LiveTurnView {
             assistant: LiveMarkdown::new(crate::assistant_text::MarkdownLane::Assistant),
             reasoning: LiveMarkdown::new(crate::assistant_text::MarkdownLane::Reasoning),
             tool_output: LiveToolOutput::default(),
+            model_output_chunks: Vec::new(),
+            model_output_timeline_start: 0,
         }
     }
 }

@@ -8,7 +8,7 @@
 //! back to the originating MCP server. It resolves on demand only — it does not
 //! enumerate, advertise, or rank.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use async_trait::async_trait;
 use lash_core::ToolDefinition;
@@ -47,26 +47,32 @@ impl McpDeferredToolResolver {
 
 #[async_trait]
 impl DeferredToolResolver for McpDeferredToolResolver {
-    async fn resolve(&self, path: &str) -> Resolution {
-        match self.by_call_path.get(path) {
-            Some(tool) => {
-                // The Tool Execution Binding records the routing the host needs
-                // to fulfil and to rebuild the grant on replay/recovery: which
-                // MCP server backs this tool and which underlying tool id to
-                // call.
-                let execution_binding = json!({
-                    "kind": "mcp",
-                    "server": tool.server,
-                    "tool_id": tool.definition.manifest.id.to_string(),
-                });
-                Resolution::Resolved(Box::new(
-                    ToolGrant::new(tool.definition.clone())
-                        .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID)
-                        .with_execution_binding(execution_binding),
-                ))
-            }
-            None => Resolution::NotAvailable,
-        }
+    async fn resolve(&self, paths: &[&str]) -> BTreeMap<String, Resolution> {
+        paths
+            .iter()
+            .map(|path| {
+                let resolution = match self.by_call_path.get(*path) {
+                    Some(tool) => {
+                        // The Tool Execution Binding records the routing the host needs
+                        // to fulfil and to rebuild the grant on replay/recovery: which
+                        // MCP server backs this tool and which underlying tool id to
+                        // call.
+                        let execution_binding = json!({
+                            "kind": "mcp",
+                            "server": tool.server,
+                            "tool_id": tool.definition.manifest.id.to_string(),
+                        });
+                        Resolution::Resolved(Box::new(
+                            ToolGrant::new(tool.definition.clone())
+                                .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID)
+                                .with_execution_binding(execution_binding),
+                        ))
+                    }
+                    None => Resolution::NotAvailable,
+                };
+                ((*path).to_string(), resolution)
+            })
+            .collect()
     }
 }
 
@@ -95,7 +101,8 @@ mod tests {
     async fn resolves_known_call_path_with_execution_binding() {
         let resolver =
             McpDeferredToolResolver::new([mcp_tool("appworld", "venmo_send", "venmo", "send")]);
-        let resolution = resolver.resolve("venmo.send").await;
+        let mut resolutions = resolver.resolve(&["venmo.send"]).await;
+        let resolution = resolutions.remove("venmo.send").unwrap();
         let Resolution::Resolved(grant) = resolution else {
             panic!("expected resolved grant");
         };
@@ -111,9 +118,10 @@ mod tests {
     #[tokio::test]
     async fn unknown_call_path_is_not_available() {
         let resolver = McpDeferredToolResolver::new(std::iter::empty());
+        let mut resolutions = resolver.resolve(&["mystery.run"]).await;
         assert!(matches!(
-            resolver.resolve("mystery.run").await,
-            Resolution::NotAvailable
+            resolutions.remove("mystery.run"),
+            Some(Resolution::NotAvailable)
         ));
     }
 }
