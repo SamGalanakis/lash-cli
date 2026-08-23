@@ -4,6 +4,8 @@ mod live;
 mod projection;
 mod queues;
 mod runtime_events;
+#[cfg(test)]
+mod runtime_events_tests;
 mod view;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
