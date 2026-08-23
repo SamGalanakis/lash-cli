@@ -17,7 +17,7 @@ pub fn render(session: &LoadedSession) -> String {
     let title = session
         .meta
         .as_ref()
-        .map(|meta| meta.session_name.clone())
+        .map(|meta| pick_display_title(session, "", &meta.session_id))
         .unwrap_or_else(|| "lash session".to_string());
 
     out.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
@@ -48,27 +48,16 @@ pub fn render(session: &LoadedSession) -> String {
 // ─── stats ──────────────────────────────────────────────────────────────────
 
 pub(crate) fn write_hero(out: &mut String, session: &LoadedSession, _stats: &SessionStats) {
-    let (name, model, id, created, cwd, parent) = if let Some(meta) = &session.meta {
+    let (id, parent) = if let Some(meta) = &session.meta {
         (
-            meta.session_name.clone(),
-            meta.model.clone(),
             meta.session_id.clone(),
-            meta.created_at.clone(),
-            meta.cwd.clone(),
             meta.parent_session_id().map(ToOwned::to_owned),
         )
     } else {
-        (
-            "lash session".to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            None,
-            None,
-        )
+        (String::new(), None)
     };
 
-    let display_title = pick_display_title(session, &name, &id);
+    let display_title = pick_display_title(session, "", &id);
 
     out.push_str("<header class=\"hero\">\n");
     out.push_str("  <div class=\"hero-left\">\n");
@@ -88,25 +77,11 @@ pub(crate) fn write_hero(out: &mut String, session: &LoadedSession, _stats: &Ses
             escape(&id)
         );
     }
-    if !model.is_empty() {
+    if let Some(model) = &session.model_id {
         let _ = writeln!(
             out,
             "      <span class=\"meta-row\"><span class=\"meta-key\">model</span><span class=\"meta-val\">{}</span></span>",
-            escape(&model)
-        );
-    }
-    if !created.is_empty() {
-        let _ = writeln!(
-            out,
-            "      <span class=\"meta-row\"><span class=\"meta-key\">created</span><span class=\"meta-val\">{}</span></span>",
-            escape(&created)
-        );
-    }
-    if let Some(cwd) = cwd {
-        let _ = writeln!(
-            out,
-            "      <span class=\"meta-row\"><span class=\"meta-key\">cwd</span><span class=\"meta-val\">{}</span></span>",
-            escape(&cwd)
+            escape(model)
         );
     }
     if let Some(parent) = parent {

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use lash_core::ChronologicalPayload;
+use lash::persistence::ChronologicalPayload;
 
 use crate::LoadedSession;
 use crate::transcript::{
@@ -11,8 +11,8 @@ use crate::tree::{LoadedSessionNode, LoadedSessionTree, NodeRelation};
 
 use super::assets::{CSS, JS};
 use super::entries::{
-    render_assistant_reasoning_entry, render_assistant_text_entry, render_lashlang_step,
-    render_message,
+    pick_display_title, render_assistant_reasoning_entry, render_assistant_text_entry,
+    render_lashlang_step, render_message,
 };
 use super::escaping::{escape, escape_attr, js_escape};
 use super::prompt::{
@@ -25,7 +25,8 @@ use super::view_model::{RenderCtx, one_line_summary};
 pub fn render_tree(tree: &LoadedSessionTree) -> String {
     let mut out = String::with_capacity(128 * 1024);
 
-    let title = tree.root().meta.session_name.clone();
+    let root_session = node_as_session(tree.root());
+    let title = pick_display_title(&root_session, "", &tree.root().meta.session_id);
     out.push_str("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n");
     out.push_str("<meta charset=\"utf-8\">\n");
     out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
@@ -186,6 +187,7 @@ fn node_as_session(node: &LoadedSessionNode) -> LoadedSession {
         meta: Some(node.meta.clone()),
         chronological: node.chronological.clone(),
         trace_path: node.db_path.clone(),
+        model_id: node.model_id.clone(),
         context_window_tokens: node.context_window_tokens,
         llm_prompts: node.llm_prompts.clone(),
     }
@@ -198,18 +200,16 @@ fn write_view_hero(
     chain: &[&LoadedSessionNode],
 ) {
     let meta = &head.meta;
-    let display_title =
-        if meta.session_name.trim().is_empty() || meta.session_name == meta.session_id {
-            match &head.kind {
-                NodeRelation::Root => "lash session".to_string(),
-                NodeRelation::Subagent { task, .. } => task
-                    .as_deref()
-                    .map(|task| one_line_summary(task, 80))
-                    .unwrap_or_else(|| "subagent".to_string()),
-            }
-        } else {
-            meta.session_name.clone()
-        };
+    let display_title = match &head.kind {
+        NodeRelation::Root => {
+            let session = node_as_session(head);
+            pick_display_title(&session, "", &meta.session_id)
+        }
+        NodeRelation::Subagent { task, .. } => task
+            .as_deref()
+            .map(|task| one_line_summary(task, 80))
+            .unwrap_or_else(|| "subagent".to_string()),
+    };
     let role_label = match &head.kind {
         NodeRelation::Root => "root session".to_string(),
         NodeRelation::Subagent {
@@ -253,11 +253,8 @@ fn write_view_hero(
         "view",
         &format!("{} · {}", short_session_id(&meta.session_id), view_label),
     );
-    if !meta.model.is_empty() {
-        write_meta_row(out, "model", &meta.model);
-    }
-    if let Some(cwd) = &meta.cwd {
-        write_meta_row(out, "cwd", cwd);
+    if let Some(model) = &head.model_id {
+        write_meta_row(out, "model", model);
     }
     let subagent_count: usize = chain.iter().map(|n| n.subagent_children.len()).sum();
     if subagent_count > 0 {

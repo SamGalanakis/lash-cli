@@ -3,7 +3,8 @@
 
 use super::*;
 use crate::html::escaping::escape_breaks;
-use lash_core::ChronologicalPayload;
+use lash::direct::AttachmentSource;
+use lash::persistence::ChronologicalPayload;
 
 pub(crate) fn render_part(out: &mut String, part: &Part) {
     match &part.prune_state {
@@ -43,7 +44,7 @@ pub(crate) fn render_part(out: &mut String, part: &Part) {
         PartKind::Code => render_code(out, "code", &part.content, None),
         PartKind::Output => render_code(out, "output", &part.content, Some("output")),
         PartKind::Error => render_code(out, "error", &part.content, Some("error")),
-        PartKind::Image => render_image_part(out, part),
+        PartKind::Attachment => render_attachment_part(out, part),
         PartKind::ToolCall => render_tool_protocol_part(out, part, "tool_call"),
         PartKind::ToolResult => render_tool_protocol_part(out, part, "tool_result"),
         PartKind::Reasoning => render_reasoning(out, &part.content),
@@ -97,8 +98,8 @@ pub(crate) fn first_n_chars(s: &str, n: usize) -> String {
 }
 
 pub(crate) fn pick_display_title(session: &LoadedSession, name: &str, id: &str) -> String {
-    // If the session_name is the session_id (a UUID), or empty, look for a
-    // more useful title in the transcript: the first user message's first
+    // Prefer a supplied label unless it is empty or merely the session id;
+    // otherwise derive a useful title from the first user message's first
     // line. Some user messages have UserInputProvenance set; others don't,
     // so fall back to assembling text from Text/Prose parts.
     let name_trim = name.trim();
@@ -207,28 +208,50 @@ pub(crate) fn render_code(out: &mut String, class: &str, content: &str, badge: O
     }
 }
 
-fn render_image_part(out: &mut String, part: &Part) {
-    let label = part
+fn render_attachment_part(out: &mut String, part: &Part) {
+    let source = part
         .attachment
         .as_ref()
-        .and_then(|a| a.reference.label.clone())
-        .unwrap_or_else(|| {
-            if part.content.trim().is_empty() {
-                "image attached".to_string()
+        .map(|attachment| &attachment.source);
+    let kind = source
+        .and_then(AttachmentSource::media_type)
+        .map_or("attachment", |media_type| {
+            if media_type.is_image() {
+                "image"
             } else {
-                part.content.clone()
+                "attachment"
             }
         });
-    let aref = part
-        .attachment
-        .as_ref()
-        .map(|a| a.reference.id.to_string())
+    let source_label = source.map(|source| match source {
+        AttachmentSource::Inline { media_type, bytes } => {
+            format!("{media_type} · {} bytes", bytes.len())
+        }
+        AttachmentSource::Stored { attachment_ref } => attachment_ref
+            .label
+            .clone()
+            .unwrap_or_else(|| attachment_ref.id.to_string()),
+        AttachmentSource::ExternalUrl { url, .. } => url.clone(),
+        AttachmentSource::ProviderFile { id, .. } => id.clone(),
+    });
+    let label = if part.content.trim().is_empty() {
+        source_label.unwrap_or_else(|| format!("{kind} attached"))
+    } else {
+        part.content.clone()
+    };
+    let reference = source
+        .map(|source| match source {
+            AttachmentSource::Inline { media_type, .. } => media_type.to_string(),
+            AttachmentSource::Stored { attachment_ref } => attachment_ref.id.to_string(),
+            AttachmentSource::ExternalUrl { url, .. } => url.clone(),
+            AttachmentSource::ProviderFile { id, .. } => id.clone(),
+        })
         .unwrap_or_default();
     let _ = writeln!(
         out,
-        "          <div class=\"part part--image\"><span class=\"part-tag\">image</span><span class=\"image-label\">{}</span><span class=\"image-ref\">{}</span></div>",
+        "          <div class=\"part part--image\"><span class=\"part-tag\">{}</span><span class=\"image-label\">{}</span><span class=\"image-ref\">{}</span></div>",
+        escape(kind),
         escape(&label),
-        escape(&aref)
+        escape(&reference)
     );
 }
 

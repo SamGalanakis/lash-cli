@@ -29,8 +29,8 @@ mod tests {
     use super::*;
     use crate::LoadedSession;
     use crate::trace::{LlmCallUsage, LlmPromptSnapshot, RequestMessage};
-    use lash_core::session_model::{Part, PartKind, PruneState, shared_parts};
-    use lash_core::{ChronologicalEntry, ChronologicalPayload};
+    use lash::persistence::{ChronologicalEntry, ChronologicalPayload};
+    use lash_core::session_model::{Part, shared_parts};
     use lash_rlm_types::RlmTrajectoryEntry;
     use std::path::PathBuf;
 
@@ -64,18 +64,7 @@ mod tests {
         lash_core::session_model::Message {
             id: id.to_string(),
             role: lash_core::session_model::MessageRole::User,
-            parts: shared_parts(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: text.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
             origin: None,
         }
     }
@@ -84,18 +73,7 @@ mod tests {
         lash_core::session_model::Message {
             id: id.to_string(),
             role: lash_core::session_model::MessageRole::Assistant,
-            parts: shared_parts(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: text.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
             origin: None,
         }
     }
@@ -106,9 +84,7 @@ mod tests {
             protocol_iteration,
             code: "x = 1".to_string(),
             output: vec!["1".to_string()],
-            images: Vec::new(),
-            error: None,
-            final_output: None,
+            ..Default::default()
         }
     }
 
@@ -140,6 +116,7 @@ mod tests {
                 },
             ],
             trace_path: PathBuf::from("session.trace.jsonl"),
+            model_id: None,
             context_window_tokens: None,
             llm_prompts: Vec::new(),
         };
@@ -197,18 +174,13 @@ mod tests {
 
     #[test]
     fn assistant_tool_call_message_part_renders_without_detached_tool_record() {
-        let tool_part = Part {
-            id: "m0.p0".to_string(),
-            kind: PartKind::ToolCall,
-            content: r#"{"q":"x"}"#.to_string(),
-            attachment: None,
-            tool_call_id: Some("call_1".to_string()),
-            tool_name: Some("lookup".to_string()),
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        };
+        let tool_part = Part::tool_call(
+            "m0.p0".to_string(),
+            r#"{"q":"x"}"#.to_string(),
+            "call_1".to_string(),
+            "lookup".to_string(),
+            None,
+        );
         let assistant_msg = lash_core::session_model::Message {
             id: "m0".to_string(),
             role: lash_core::session_model::MessageRole::Assistant,
@@ -222,6 +194,7 @@ mod tests {
                 payload: ChronologicalPayload::Message(assistant_msg),
             }],
             trace_path: PathBuf::from("session.trace.jsonl"),
+            model_id: None,
             context_window_tokens: None,
             llm_prompts: Vec::new(),
         };
@@ -248,6 +221,7 @@ mod tests {
                 }),
             }],
             trace_path: PathBuf::from("session.trace.jsonl"),
+            model_id: None,
             context_window_tokens: None,
             llm_prompts: Vec::new(),
         };
@@ -264,6 +238,7 @@ mod tests {
             meta: None,
             chronological: Vec::new(),
             trace_path: PathBuf::from("session.trace.jsonl"),
+            model_id: None,
             context_window_tokens: Some(100_000),
             llm_prompts: vec![LlmPromptSnapshot {
                 usage: Some(LlmCallUsage {

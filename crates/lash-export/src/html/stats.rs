@@ -1,4 +1,4 @@
-use lash_core::ChronologicalPayload;
+use lash::persistence::ChronologicalPayload;
 use lash_core::session_model::{MessageRole, PruneState};
 
 use crate::LoadedSession;

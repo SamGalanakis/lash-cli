@@ -274,6 +274,11 @@ fn short_hash(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn consumes_current_trace_schema() {
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
+    }
     use lash_trace::{TraceContext, TraceLlmMessage, TraceRecord};
     use std::io::Write;
 
@@ -348,6 +353,7 @@ mod tests {
                     duration_ms: 1234,
                     terminal_reason: None,
                     parts: None,
+                    generation_disposition: None,
                 },
                 usage: Some(TraceTokenUsage {
                     input_tokens: 100,
@@ -358,6 +364,7 @@ mod tests {
                 }),
                 provider_usage: None,
                 stream_summary: None,
+                attempts: None,
             },
         );
         write_records(&mut tmp, &[started, completed]);
@@ -422,7 +429,7 @@ mod tests {
         writeln!(tmp, "not json").unwrap();
         writeln!(
             tmp,
-            r#"{{"schema_version":2,"id":"x","timestamp":"t","context":{{}},"type":"future_event","payload":{{}}}}"#
+            r#"{{"schema_version":9,"id":"x","timestamp":"t","context":{{}},"type":"future_event","payload":{{}}}}"#
         )
         .unwrap();
         let started = TraceRecord::new(
@@ -471,6 +478,7 @@ mod tests {
                         duration_ms: 1,
                         terminal_reason: None,
                         parts: None,
+                        generation_disposition: None,
                     },
                     usage: Some(TraceTokenUsage {
                         input_tokens: input,
@@ -481,6 +489,7 @@ mod tests {
                     }),
                     provider_usage: None,
                     stream_summary: None,
+                    attempts: None,
                 },
             ));
         }
