@@ -12,7 +12,7 @@ pub(crate) async fn start_mode_command(
     root: &Path,
     state: &Arc<Mutex<RuntimeState>>,
     args: Value,
-) -> ToolResult {
+) -> ToolOutcome {
     start_mode(root, state, args)
 }
 
@@ -20,7 +20,7 @@ pub(crate) async fn stop_mode_command(
     _ctx: PluginCommandContext,
     root: &Path,
     state: &Arc<Mutex<RuntimeState>>,
-) -> ToolResult {
+) -> ToolOutcome {
     stop_mode(root, state)
 }
 
@@ -28,11 +28,15 @@ pub(crate) async fn clear_mode_command(
     _ctx: PluginCommandContext,
     root: &Path,
     state: &Arc<Mutex<RuntimeState>>,
-) -> ToolResult {
+) -> ToolOutcome {
     clear_mode(root, state)
 }
 
-pub(crate) fn start_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>, args: Value) -> ToolResult {
+pub(crate) fn start_mode(
+    root: &Path,
+    state: &Arc<Mutex<RuntimeState>>,
+    args: Value,
+) -> ToolOutcome {
     let objective = args
         .get("objective")
         .and_then(Value::as_str)
@@ -42,7 +46,7 @@ pub(crate) fn start_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>, args: Va
     let summary = {
         let mut state = match state.lock() {
             Ok(value) => value,
-            Err(_) => return ToolResult::err_fmt("autoresearch state poisoned"),
+            Err(_) => return ToolOutcome::err_fmt("autoresearch state poisoned"),
         };
         state.touched = true;
         state.mode.active = true;
@@ -51,7 +55,7 @@ pub(crate) fn start_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>, args: Va
         }
         let entries = match load_journal(root) {
             Ok(value) => value,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         compute_summary(
             &state.mode,
@@ -61,51 +65,51 @@ pub(crate) fn start_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>, args: Va
         )
     };
     if let Err(err) = rewrite_markdown(root, &summary) {
-        return ToolResult::err_fmt(err);
+        return ToolOutcome::err_fmt(err);
     }
     let queued_input = objective.as_ref().map(|objective| {
         format!(
             "Start autoresearch.\nObjective: {objective}\nIf there is no active experiment segment yet, initialize one. Then make one concrete change, run a measurement, log the result, keep wins, discard regressions, and continue."
         )
     });
-    ToolResult::ok(json!({
+    ToolOutcome::ok(json!({
         "status": summary,
         "queued_input": queued_input,
         "message": "Autoresearch mode on."
     }))
 }
 
-pub(crate) fn stop_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolResult {
+pub(crate) fn stop_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolOutcome {
     let summary = {
         let mut state = match state.lock() {
             Ok(value) => value,
-            Err(_) => return ToolResult::err_fmt("autoresearch state poisoned"),
+            Err(_) => return ToolOutcome::err_fmt("autoresearch state poisoned"),
         };
         state.mode.active = false;
         state.running = None;
         let entries = match load_journal(root) {
             Ok(value) => value,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         compute_summary(&state.mode, &entries, None, state.last_run.clone())
     };
     if let Err(err) = rewrite_markdown(root, &summary) {
-        return ToolResult::err_fmt(err);
+        return ToolOutcome::err_fmt(err);
     }
-    ToolResult::ok(json!({
+    ToolOutcome::ok(json!({
         "status": summary,
         "message": "Autoresearch mode off."
     }))
 }
 
-pub(crate) fn clear_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolResult {
+pub(crate) fn clear_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolOutcome {
     if let Err(err) = delete_session_files(root) {
-        return ToolResult::err_fmt(err);
+        return ToolOutcome::err_fmt(err);
     }
     let summary = {
         let mut state = match state.lock() {
             Ok(value) => value,
-            Err(_) => return ToolResult::err_fmt("autoresearch state poisoned"),
+            Err(_) => return ToolOutcome::err_fmt("autoresearch state poisoned"),
         };
         state.touched = false;
         state.mode = ModeSnapshot::default();
@@ -113,41 +117,41 @@ pub(crate) fn clear_mode(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolR
         state.last_run = None;
         StatusSummary::default()
     };
-    ToolResult::ok(json!({
+    ToolOutcome::ok(json!({
         "status": summary,
         "message": "Cleared autoresearch session files."
     }))
 }
 
-pub(crate) fn export_summary(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolResult {
+pub(crate) fn export_summary(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolOutcome {
     let summary = match full_summary_from_runtime(root, state) {
         Ok(value) => value,
-        Err(err) => return ToolResult::err_fmt(err.to_string()),
+        Err(err) => return ToolOutcome::err_fmt(err.to_string()),
     };
     match write_export_html(root, &summary) {
-        Ok(path) => ToolResult::ok(json!({
+        Ok(path) => ToolOutcome::ok(json!({
             "status": summary,
             "path": path.display().to_string(),
             "message": format!("Wrote {}.", EXPORT_FILE),
         })),
-        Err(err) => ToolResult::err_fmt(err),
+        Err(err) => ToolOutcome::err_fmt(err),
     }
 }
 
-pub(crate) fn require_string(args: &Value, key: &str) -> Result<String, ToolResult> {
+pub(crate) fn require_string(args: &Value, key: &str) -> Result<String, ToolOutcome> {
     args.get(key)
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .ok_or_else(|| ToolResult::err_fmt(format_args!("missing required string `{key}`")))
+        .ok_or_else(|| ToolOutcome::err_fmt(format_args!("missing required string `{key}`")))
 }
 
-pub(crate) fn require_f64(args: &Value, key: &str) -> Result<f64, ToolResult> {
+pub(crate) fn require_f64(args: &Value, key: &str) -> Result<f64, ToolOutcome> {
     args.get(key)
         .and_then(Value::as_f64)
         .filter(|value| value.is_finite())
-        .ok_or_else(|| ToolResult::err_fmt(format_args!("missing required number `{key}`")))
+        .ok_or_else(|| ToolOutcome::err_fmt(format_args!("missing required number `{key}`")))
 }
 
 pub(crate) fn parse_direction(value: Option<&str>) -> Result<Direction, String> {

@@ -81,14 +81,14 @@ pub(crate) fn session_summary_from_runtime(
     compute_summary_from_state(root, state)
 }
 
-pub(crate) fn status_tool_result(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolResult {
+pub(crate) fn status_tool_outcome(root: &Path, state: &Arc<Mutex<RuntimeState>>) -> ToolOutcome {
     match session_summary_from_runtime(root, state) {
-        Ok(summary) => ToolResult::ok(json!(summary)),
-        Err(err) => ToolResult::err_fmt(err.to_string()),
+        Ok(summary) => ToolOutcome::ok(json!(summary)),
+        Err(err) => ToolOutcome::err_fmt(err.to_string()),
     }
 }
 
-pub(crate) fn tool_result_output<T>(result: ToolResult) -> Result<T, PluginOperationFailure>
+pub(crate) fn tool_outcome_output<T>(result: ToolOutcome) -> Result<T, PluginOperationFailure>
 where
     T: serde::de::DeserializeOwned,
 {
