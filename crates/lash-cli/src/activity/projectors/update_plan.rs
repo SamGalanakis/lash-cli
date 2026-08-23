@@ -115,7 +115,18 @@ fn update_plan_failure_lines(args: &Value, result: &Value) -> Vec<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        lines.push(inline_text(message));
+        let message =
+            serde_json::from_str::<String>(message).unwrap_or_else(|_| message.to_string());
+        lines.push(inline_text(&message));
+    } else if let Some(message) = result
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let message =
+            serde_json::from_str::<String>(message).unwrap_or_else(|_| message.to_string());
+        lines.push(inline_text(&message));
     }
     lines.extend(update_plan_detail_lines(args));
     lines

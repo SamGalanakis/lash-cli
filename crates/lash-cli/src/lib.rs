@@ -4,4 +4,5 @@
 //! and filesystem layout are host policy, not Lash runtime APIs.
 
 pub mod config;
+pub mod execution_settings;
 pub mod paths;

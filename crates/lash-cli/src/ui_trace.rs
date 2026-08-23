@@ -45,16 +45,6 @@ impl TraceRepoStatus {
             worktree: status.worktree.clone(),
         }
     }
-
-    #[cfg(test)]
-    pub(crate) fn into_repo_status(self, cwd: &str) -> RepoStatus {
-        RepoStatus {
-            repo_root: PathBuf::from(cwd),
-            repo_name: self.repo_name,
-            branch: self.branch,
-            worktree: self.worktree,
-        }
-    }
 }
 
 impl UiTraceContext {
@@ -565,7 +555,7 @@ mod tests {
             .expect("recorded turn activity op");
         assert!(matches!(
             &event_op.event,
-            TurnEvent::AssistantProseDelta { text } if text == "world"
+            TurnEvent::AssistantProseDelta { text } if text.as_ref() == "world"
         ));
         assert!(matches!(
             trace.ops.last(),

@@ -34,7 +34,7 @@ pub(crate) fn turn_input_display_text(input: &lash_core::TurnInput) -> String {
         .iter()
         .filter_map(|item| match item {
             lash_core::InputItem::Text { text } => Some(text.as_str()),
-            lash_core::InputItem::ImageRef { .. } => None,
+            lash_core::InputItem::Attachment { .. } => None,
         })
         .collect::<Vec<_>>()
         .join("")
@@ -48,13 +48,16 @@ pub(crate) fn prepared_turn_from_queued_input(
         .items
         .iter()
         .filter_map(|item| match item {
-            lash_core::InputItem::ImageRef { id } => input.image_blobs.get(id),
+            lash_core::InputItem::Attachment {
+                source: lash_core::AttachmentSource::Inline { bytes, .. },
+            } => Some(bytes),
+            lash_core::InputItem::Attachment { .. } => None,
             lash_core::InputItem::Text { .. } => None,
         })
         .enumerate()
         .map(|(idx, png_bytes)| PendingImage {
             id: idx + 1,
-            png_bytes: png_bytes.clone(),
+            png_bytes: png_bytes.to_vec(),
         })
         .collect::<Vec<_>>();
     if text.trim().is_empty() && images.is_empty() {
@@ -109,6 +112,19 @@ impl App {
             .insert(turn.draft_id.clone(), turn);
     }
 
+    pub fn cache_active_turn_draft(&mut self, turn: PreparedTurn) {
+        self.cache_draft_presentation(turn.clone());
+        self.queues.active_turn_drafts.push(turn);
+    }
+
+    pub fn take_active_turn_drafts(&mut self) -> Vec<PreparedTurn> {
+        std::mem::take(&mut self.queues.active_turn_drafts)
+    }
+
+    pub fn clear_active_turn_drafts(&mut self) {
+        self.queues.active_turn_drafts.clear();
+    }
+
     pub(super) fn take_draft_presentation_by_id(&mut self, draft_id: &str) -> Option<PreparedTurn> {
         self.queues.take_by_draft_id(draft_id)
     }
@@ -118,19 +134,6 @@ impl App {
         content: &str,
     ) -> Option<PreparedTurn> {
         self.queues.take_matching_content(content)
-    }
-
-    pub(super) fn take_draft_presentation_for_input(
-        &mut self,
-        id: Option<&str>,
-        content: &str,
-    ) -> Option<PreparedTurn> {
-        if let Some(id) = id
-            && let Some(turn) = self.take_draft_presentation_by_id(id)
-        {
-            return Some(turn);
-        }
-        self.take_matching_draft_presentation(content)
     }
 
     pub fn set_pending_turn_input_snapshot(&mut self, inputs: Vec<lash_core::PendingTurnInput>) {

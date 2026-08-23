@@ -2,7 +2,6 @@ use lash::CancellationToken;
 use lash::{LashSession, provider::ProviderHandle};
 use lash_core::session_model::Message;
 use lash_core::{SessionPolicy, ToolState};
-use lash_standard_plugins::StandardContextApproach;
 
 use crate::SkillCatalog;
 use crate::app::{App, UiTimelineItem};
@@ -52,6 +51,7 @@ async fn activate_opened_session(
     let Some(session) = runtime.as_ref() else {
         return Err("opened session was not installed".to_string());
     };
+    app.set_rlm_dialect(current_rlm_dialect(runtime));
     session
         .admin()
         .commands()
@@ -74,28 +74,31 @@ fn fallback_policy_for_session_switch(
     current_model_variant: &mut Option<String>,
     _current_execution_mode: &mut ExecutionMode,
 ) -> SessionPolicy {
-    let model = lash_core::ModelSpec::from_token_limits(
-        app.model.clone(),
-        crate::model_selection::reasoning_selection_from_variant(current_model_variant.clone()),
-        app.usage.context_window.unwrap_or(1) as usize,
-        None,
-    )
-    .unwrap_or_else(|_| lash_core::ModelSpec::default())
-    .with_capability(crate::capability_catalog::capability_for(
-        provider.kind(),
-        &app.model,
-    ));
-    SessionPolicy {
-        provider_id: provider.kind().to_string(),
-        model,
-        ..SessionPolicy::default()
-    }
+    let model = lash_core::ModelSpec::builder(app.model.clone())
+        .variant(crate::model_selection::reasoning_selection_from_variant(
+            current_model_variant.clone(),
+        ))
+        .context_window_tokens(app.usage.context_window.unwrap_or(1) as usize)
+        .build()
+        .unwrap_or_else(|_| lash_core::ModelSpec::default())
+        .with_capability(crate::capability_catalog::capability_for(
+            provider.kind(),
+            &app.model,
+        ));
+    let mut policy = SessionPolicy::new(crate::host_policy::turn_budget());
+    policy.provider_id = provider.kind().to_string();
+    policy.model = model;
+    policy.no_progress_budget = crate::host_policy::no_progress_budget();
+    policy
 }
 
-fn fallback_standard_context_approach(
-    current_execution_mode: &ExecutionMode,
-) -> Option<StandardContextApproach> {
-    (current_execution_mode == &ExecutionMode::Standard).then(StandardContextApproach::default)
+pub(super) fn current_rlm_dialect(
+    runtime: &Option<LashSession>,
+) -> Option<crate::execution_settings::RlmDialect> {
+    use lash::rlm::RlmSessionExt as _;
+    runtime
+        .as_ref()
+        .and_then(|session| session.rlm_config().dialect)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -111,6 +114,7 @@ pub(super) async fn handle_clear(
     provider: &ProviderHandle,
     current_model_variant: &mut Option<String>,
     current_execution_mode: &mut ExecutionMode,
+    new_rlm_dialect: Option<crate::execution_settings::RlmDialect>,
     active_tool_state: &mut ToolState,
     pending_clear_after_return: &mut bool,
 ) -> anyhow::Result<bool> {
@@ -127,17 +131,14 @@ pub(super) async fn handle_clear(
         current_execution_mode,
     );
     let opened = runtime_factory
-        .fresh(
-            policy,
-            *current_execution_mode,
-            fallback_standard_context_approach(current_execution_mode),
-        )
+        .fresh(policy, *current_execution_mode, new_rlm_dialect)
         .await?;
     *runtime = Some(opened.session);
     *logger = opened.logger;
     let Some(session) = runtime.as_ref() else {
         return Err(anyhow::anyhow!("opened session was not installed"));
     };
+    app.set_rlm_dialect(current_rlm_dialect(runtime));
     if let Some(rt) = runtime.as_ref() {
         rt.admin()
             .commands()
@@ -179,6 +180,7 @@ pub(super) async fn handle_retry(
     current_execution_mode: &mut ExecutionMode,
     toolset_hash: &mut String,
     app_tx: &crate::event::AppEventTx,
+    runtime_factory: &CliSessionOpener,
 ) -> anyhow::Result<bool> {
     if let Some(previous) = last_turn.clone() {
         let definitions = match runtime.as_ref() {
@@ -206,6 +208,7 @@ pub(super) async fn handle_retry(
             cancel_token,
             active_stream_id,
             app_tx,
+            runtime_factory,
         )
         .await;
     } else {
@@ -216,24 +219,12 @@ pub(super) async fn handle_retry(
 
 pub(super) async fn handle_fork(
     app: &mut App,
+    runtime_factory: &CliSessionOpener,
     logger: &mut SessionLogger,
     runtime: &mut Option<LashSession>,
-    provider: &ProviderHandle,
-    current_model_variant: &Option<String>,
     _toolset_hash: &str,
 ) -> anyhow::Result<bool> {
-    match fork::fork_current_session(
-        runtime.as_ref(),
-        logger,
-        provider,
-        &app.model,
-        app.usage
-            .context_window
-            .expect("app context_window must be set before forking"),
-        current_model_variant.as_deref(),
-    )
-    .await
-    {
+    match fork::fork_current_session(runtime.as_ref(), runtime_factory, logger, &app.model).await {
         Ok(forked) => {
             let fallback_command = fork_resume_command(&forked.session_id);
             let exe = match fork::resolve_resume_executable() {
@@ -341,7 +332,7 @@ pub(crate) async fn switch_to_session_identifier(
             identifier,
             policy,
             *current_execution_mode,
-            fallback_standard_context_approach(current_execution_mode),
+            current_rlm_dialect(runtime),
         )
         .await?;
     activate_opened_session(
@@ -359,9 +350,14 @@ pub(crate) async fn switch_to_session_identifier(
     )
     .await
     .map_err(anyhow::Error::msg)?;
-    *toolset_hash = hash12(
-        &serde_json::to_vec(&active_tool_state.tool_manifests()).unwrap_or_else(|_| b"[]".to_vec()),
-    );
+    let manifests = runtime
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("opened session was not installed"))?
+        .admin()
+        .tools()
+        .active_manifests()
+        .await?;
+    *toolset_hash = hash12(&serde_json::to_vec(&manifests).unwrap_or_else(|_| b"[]".to_vec()));
     Ok(())
 }
 
@@ -413,10 +409,11 @@ pub(super) async fn handle_resume(
         }
     } else {
         const SESSION_PICKER_LIMIT: usize = 50;
+        let incompatible_count = session_log::incompatible_session_count();
         let current_session_id = logger.session_id.clone();
         let mut sessions = session_log::list_recent_sessions(SESSION_PICKER_LIMIT + 1).await;
         sessions.retain(|si| si.session_id != current_session_id);
-        if sessions.is_empty() {
+        if sessions.is_empty() && incompatible_count == 0 {
             app.timeline.push(UiTimelineItem::SystemMessage(
                 "No sessions found.".to_string(),
             ));
@@ -424,7 +421,7 @@ pub(super) async fn handle_resume(
             app.scroll_to_bottom();
         } else {
             sessions.truncate(SESSION_PICKER_LIMIT);
-            app.show_session_picker(sessions);
+            app.show_session_picker_with_incompatible(sessions, incompatible_count);
         }
     }
     Ok(false)

@@ -388,6 +388,7 @@ async fn handle_tab_submit(ctx: &mut SessionCtx<'_>) -> anyhow::Result<bool> {
         ctx.cancel_token,
         ctx.active_stream_id,
         ctx.app_tx,
+        ctx.runtime_factory,
     )
     .await;
     *ctx.last_turn = Some(TurnReplayPayload {
@@ -519,7 +520,7 @@ async fn handle_enter_submit(ctx: &mut SessionCtx<'_>) -> anyhow::Result<bool> {
         {
             Ok(()) => {
                 record_queue_current_turn_input(ctx.ui_trace, &queued);
-                ctx.app.cache_draft_presentation(queued.clone());
+                ctx.app.cache_active_turn_draft(queued.clone());
             }
             Err(err) => {
                 push_system_message(
@@ -573,6 +574,7 @@ async fn handle_enter_submit(ctx: &mut SessionCtx<'_>) -> anyhow::Result<bool> {
                 ctx.cancel_token,
                 ctx.active_stream_id,
                 ctx.app_tx,
+                ctx.runtime_factory,
             )
             .await;
             *ctx.last_turn = Some(TurnReplayPayload {

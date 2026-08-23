@@ -17,69 +17,30 @@ use crate::input_items::build_items_from_editor_input;
 #[cfg(test)]
 use lash::InputItem;
 #[cfg(test)]
+use lash_core::MessageRole;
+#[cfg(test)]
 use lash_core::PluginMessage;
 #[cfg(test)]
-use lash_core::session_model::{Part, PartKind, PruneState};
-#[cfg(test)]
-use lash_core::{AttachmentCreateMeta, AttachmentStore, ImageMediaType, MediaType, MessageRole};
+use lash_core::session_model::{Part, PartKind};
 
 #[cfg(test)]
 pub(crate) async fn make_injected_plugin_message(turn: &PreparedTurn) -> PluginMessage {
-    let (items, image_blobs) =
-        build_items_from_editor_input(&turn.effective_text, turn.images.clone());
-    let attachment_store = lash_core::InMemoryAttachmentStore::new();
+    let items = build_items_from_editor_input(&turn.effective_text, turn.images.clone());
     let mut parts = Vec::new();
-    let mut image_ids = Vec::new();
     for item in items {
         match item {
             InputItem::Text { text } => {
                 if text.is_empty() {
                     continue;
                 }
-                parts.push(Part {
-                    id: String::new(),
-                    kind: PartKind::Text,
-                    content: text,
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                });
+                parts.push(Part::text(String::new(), text, None));
             }
-            InputItem::ImageRef { id } => {
-                let Some(bytes) = image_blobs.get(&id) else {
-                    continue;
-                };
-                if image_ids.iter().any(|candidate| candidate == &id) {
-                    continue;
-                }
-                image_ids.push(id.clone());
-                let meta = AttachmentCreateMeta::new(
-                    MediaType::Image(ImageMediaType::Png),
-                    None,
-                    None,
-                    Some(id.clone()),
-                );
-                let Ok(reference) = attachment_store.put(bytes.clone(), meta).await else {
-                    continue;
-                };
-                parts.push(Part {
-                    id: String::new(),
-                    kind: PartKind::Image,
-                    content: String::new(),
-                    attachment: Some(lash_core::session_model::message::PartAttachment {
-                        reference,
-                    }),
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                });
+            InputItem::Attachment { source } => {
+                parts.push(Part::attachment_part(
+                    String::new(),
+                    String::new(),
+                    Some(lash_core::session_model::message::PartAttachment { source }),
+                ));
             }
         }
     }
@@ -90,7 +51,7 @@ pub(crate) async fn make_injected_plugin_message(turn: &PreparedTurn) -> PluginM
         content: turn.effective_text.clone(),
         origin: None,
         parts,
-        images: Vec::new(),
+        attachments: Vec::new(),
     }
 }
 
@@ -100,7 +61,7 @@ pub(crate) fn injected_image_part_indices(message: &PluginMessage) -> Vec<usize>
         .parts
         .iter()
         .enumerate()
-        .filter_map(|(idx, part)| matches!(part.kind, PartKind::Image).then_some(idx))
+        .filter_map(|(idx, part)| matches!(part.kind, PartKind::Attachment).then_some(idx))
         .collect()
 }
 
@@ -162,6 +123,7 @@ pub(super) async fn send_user_message(
     cancel_token: &mut Option<CancellationToken>,
     active_stream_id: &mut u64,
     app_tx: &AppEventTx,
+    runtime_factory: &crate::startup::session::CliSessionOpener,
 ) {
     let mut ui_trace = ui_trace;
     if !prepared_turn.display_text.is_empty() {
@@ -195,7 +157,11 @@ pub(super) async fn send_user_message(
         .expect("runtime should be available when not running");
     tracing::info!(
         items = turn_input.items.len(),
-        images = turn_input.image_blobs.len(),
+        attachments = turn_input
+            .items
+            .iter()
+            .filter(|item| matches!(item, lash::InputItem::Attachment { .. }))
+            .count(),
         "dispatching runtime turn"
     );
     *active_stream_id = active_stream_id.wrapping_add(1);
@@ -210,14 +176,18 @@ pub(super) async fn send_user_message(
     );
 
     SessionObservationBridge::spawn(&session, stream_id, app_tx.clone());
-    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id);
+    let (cancel, return_rx) = spawn_session_turn(
+        session,
+        turn_input,
+        stream_id,
+        runtime_factory.active_effect_host(),
+    );
     *cancel_token = Some(cancel);
     *runtime_return_rx = Some(return_rx);
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn send_queued_work(
-    batch_ids: Vec<String>,
     prepared_turns: Vec<PreparedTurn>,
     app: &mut App,
     ui_trace: Option<&mut UiTraceRecorder>,
@@ -227,6 +197,7 @@ pub(super) async fn send_queued_work(
     cancel_token: &mut Option<CancellationToken>,
     active_stream_id: &mut u64,
     app_tx: &AppEventTx,
+    runtime_factory: &crate::startup::session::CliSessionOpener,
 ) {
     let mut ui_trace = ui_trace;
     for prepared_turn in &prepared_turns {
@@ -265,7 +236,8 @@ pub(super) async fn send_queued_work(
     );
 
     SessionObservationBridge::spawn(&session, stream_id, app_tx.clone());
-    let (cancel, return_rx) = spawn_session_queued_turn(session, batch_ids, stream_id);
+    let (cancel, return_rx) =
+        spawn_session_queued_turn(session, stream_id, runtime_factory.active_effect_host());
     *cancel_token = Some(cancel);
     *runtime_return_rx = Some(return_rx);
 }
@@ -361,9 +333,11 @@ pub(crate) async fn generate_session_name(sessions_dir: &std::path::Path) -> Str
     if let Ok(entries) = std::fs::read_dir(sessions_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("db")
-                && let Some(filename) = path.file_name().and_then(|name| name.to_str())
-                && let Ok(start) = session_log::load_session_start(filename).await
+            if let Some(session_id) = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_suffix(".ui.json"))
+                && let Ok(start) = session_log::load_session_start(session_id).await
             {
                 existing.insert(start.session_name);
             }

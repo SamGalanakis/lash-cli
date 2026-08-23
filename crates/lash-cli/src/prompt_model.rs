@@ -53,6 +53,7 @@ impl PromptRequest {
         self
     }
 
+    #[cfg(test)]
     pub(crate) fn with_markdown_panel(
         mut self,
         title: impl Into<String>,

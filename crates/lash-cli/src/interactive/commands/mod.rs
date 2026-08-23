@@ -104,7 +104,7 @@ async fn handle_ui_command(
 fn turn_input_has_visible_content(input: &lash_core::TurnInput) -> bool {
     input.items.iter().any(|item| match item {
         lash_core::InputItem::Text { text } => !text.trim().is_empty(),
-        lash_core::InputItem::ImageRef { id } => input.image_blobs.contains_key(id),
+        lash_core::InputItem::Attachment { .. } => true,
     })
 }
 
@@ -130,7 +130,7 @@ pub(super) async fn dispatch_queued_turn(
     _args: &Args,
     _paused: &Arc<AtomicBool>,
     _ui_extensions: &TuiExtensions,
-    _runtime_factory: &crate::startup::session::CliSessionOpener,
+    runtime_factory: &crate::startup::session::CliSessionOpener,
     _lash_config: &crate::config::LashConfig,
     runtime: &mut Option<LashSession>,
     _history: &mut Vec<Message>,
@@ -178,7 +178,6 @@ pub(super) async fn dispatch_queued_turn(
         });
     }
     send_queued_work(
-        Vec::new(),
         display_turns,
         app,
         ui_trace.as_mut(),
@@ -188,6 +187,7 @@ pub(super) async fn dispatch_queued_turn(
         cancel_token,
         active_stream_id,
         app_tx,
+        runtime_factory,
     )
     .await;
     Ok(true)
@@ -238,6 +238,7 @@ pub(super) async fn handle_builtin_command(
     match cmd {
         command::Command::Exit => Ok(true),
         command::Command::Clear => {
+            let rlm_dialect = session::current_rlm_dialect(runtime);
             session::handle_clear(
                 app,
                 runtime_factory,
@@ -250,6 +251,7 @@ pub(super) async fn handle_builtin_command(
                 provider,
                 current_model_variant,
                 current_execution_mode,
+                rlm_dialect,
                 active_tool_state,
                 pending_clear_after_return,
             )
@@ -260,30 +262,31 @@ pub(super) async fn handle_builtin_command(
             Ok(false)
         }
         command::Command::Info => {
+            let mut active_tool_count = active_tool_state.len();
             if let Some(session) = runtime.as_ref()
-                && let Ok(state) = session.admin().tools().state().await
+                && let Ok(manifests) = session.admin().tools().active_manifests().await
             {
-                *active_tool_state = state;
-                *toolset_hash = hash12(
-                    &serde_json::to_vec(&active_tool_state.tool_manifests())
-                        .unwrap_or_else(|_| b"[]".to_vec()),
-                );
+                active_tool_count = manifests.len();
+                *toolset_hash =
+                    hash12(&serde_json::to_vec(&manifests).unwrap_or_else(|_| b"[]".to_vec()));
             }
             let model = app.model.clone();
             let context_window = app.usage.context_window;
             let cwd = app.cwd.clone();
             let session_name = app.session_name.clone();
-            let standard_context_approach = (current_execution_mode == &ExecutionMode::Standard)
-                .then(lash_standard_plugins::StandardContextApproach::default);
+            let rlm_dialect = runtime.as_ref().and_then(|session| {
+                use lash::rlm::RlmSessionExt as _;
+                session.rlm_config().dialect
+            });
             let session_db_path = logger.db_path().to_string_lossy().to_string();
             app.show_document(info_document(
                 provider,
                 &model,
                 current_model_variant.as_deref(),
                 current_execution_mode,
-                standard_context_approach.as_ref(),
+                rlm_dialect,
                 context_window,
-                Some((active_tool_state.len(), toolset_hash)),
+                Some((active_tool_count, toolset_hash)),
                 &cwd,
                 Some(&session_name),
                 Some(&logger.session_id),
@@ -335,6 +338,7 @@ pub(super) async fn handle_builtin_command(
                 current_execution_mode,
                 toolset_hash,
                 app_tx,
+                runtime_factory,
             )
             .await
         }
@@ -343,15 +347,7 @@ pub(super) async fn handle_builtin_command(
             Ok(false)
         }
         command::Command::Fork => {
-            session::handle_fork(
-                app,
-                logger,
-                runtime,
-                provider,
-                current_model_variant,
-                toolset_hash,
-            )
-            .await
+            session::handle_fork(app, runtime_factory, logger, runtime, toolset_hash).await
         }
         command::Command::Tree => session::handle_tree(app, runtime).await,
         command::Command::Help => {
@@ -419,4 +415,43 @@ pub(super) async fn handle_builtin_command(
             Ok(false)
         }
     }
+}
+
+pub(super) async fn handle_new_session(
+    dialect: crate::execution_settings::RlmDialect,
+    ctx: SlashCommandCtx<'_>,
+) -> anyhow::Result<bool> {
+    let SlashCommandCtx {
+        app,
+        logger,
+        runtime_factory,
+        runtime,
+        history,
+        turn_counter,
+        last_turn,
+        active_stream_id,
+        provider,
+        current_model_variant,
+        current_execution_mode,
+        active_tool_state,
+        pending_clear_after_return,
+        ..
+    } = ctx;
+    session::handle_clear(
+        app,
+        runtime_factory,
+        logger,
+        runtime,
+        history,
+        turn_counter,
+        last_turn,
+        active_stream_id,
+        provider,
+        current_model_variant,
+        current_execution_mode,
+        Some(dialect),
+        active_tool_state,
+        pending_clear_after_return,
+    )
+    .await
 }

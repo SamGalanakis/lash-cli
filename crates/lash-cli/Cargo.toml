@@ -79,6 +79,7 @@ model2vec-rs = { version = "0.1.4", optional = true }
 [dev-dependencies]
 lash-debug-cli-harness = { path = "../lash-debug-cli-harness" }
 lash-core = { workspace = true, features = ["testing"] }
+lash-trace = { workspace = true }
 lashlang = { workspace = true }
 tempfile = { workspace = true }
 

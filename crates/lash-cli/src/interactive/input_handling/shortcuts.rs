@@ -88,6 +88,10 @@ pub(super) async fn handle_global_shortcut_key(
         }
         if app.turn_active() {
             app.note_manual_interrupt_requested();
+            app.timeline
+                .push_system_message_if_new(crate::util::manual_interrupt_message().to_string());
+            retire_pending_active_turn_inputs(ctx.runtime.as_ref(), *ctx.active_stream_id).await;
+            request_exact_turn_cancel(ctx.runtime.as_ref(), *ctx.active_stream_id).await;
             if let Some(token) = cancel_token.take() {
                 token.cancel();
             }
@@ -194,6 +198,12 @@ pub(super) async fn handle_global_shortcut_key(
             } else if app.turn_active() {
                 // Interrupt running session
                 app.note_manual_interrupt_requested();
+                app.timeline.push_system_message_if_new(
+                    crate::util::manual_interrupt_message().to_string(),
+                );
+                retire_pending_active_turn_inputs(ctx.runtime.as_ref(), *ctx.active_stream_id)
+                    .await;
+                request_exact_turn_cancel(ctx.runtime.as_ref(), *ctx.active_stream_id).await;
                 if let Some(token) = cancel_token.take() {
                     token.cancel();
                 }
@@ -204,6 +214,58 @@ pub(super) async fn handle_global_shortcut_key(
     }
 
     Ok(None)
+}
+
+async fn retire_pending_active_turn_inputs(session: Option<&lash::LashSession>, stream_id: u64) {
+    let Some(session) = session else {
+        return;
+    };
+    let turn_id = format!("cli-turn:{stream_id}");
+    let pending = match session.pending_turn_inputs().await {
+        Ok(pending) => pending,
+        Err(error) => {
+            tracing::warn!(%turn_id, %error, "failed to inspect active-turn inputs before cancellation");
+            Vec::new()
+        }
+    };
+    let candidates = pending
+        .into_iter()
+        .filter(|input| {
+            input.ingress.active_turn_id() == Some(turn_id.as_str())
+                && !matches!(
+                    input.state,
+                    lash_core::TurnInputState::Cancelled | lash_core::TurnInputState::Completed
+                )
+        })
+        .collect::<Vec<_>>();
+    let targets = candidates
+        .iter()
+        .map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id.clone()))
+        .collect::<Vec<_>>();
+    if !targets.is_empty()
+        && let Err(error) = session.cancel_pending_turn_inputs(targets).await
+    {
+        tracing::warn!(%turn_id, %error, "failed to retire active-turn inputs before cancellation");
+    }
+}
+
+async fn request_exact_turn_cancel(session: Option<&lash::LashSession>, stream_id: u64) {
+    let Some(session) = session else {
+        return;
+    };
+    let turn_id = format!("cli-turn:{stream_id}");
+    let request_id = format!("cli-cancel:{}", uuid::Uuid::new_v4());
+    if let Err(error) = session
+        .request_turn_cancel(
+            &turn_id,
+            request_id,
+            Some("interactive-user".to_string()),
+            Some("operator requested turn cancellation".to_string()),
+        )
+        .await
+    {
+        tracing::warn!(%turn_id, %error, "exact turn cancellation request failed");
+    }
 }
 
 fn is_command_palette_shortcut(key: KeyEvent) -> bool {
@@ -324,14 +386,35 @@ pub(crate) fn command_palette_items(
         .footer("/logout"),
     );
 
+    if app.execution_mode_label == "rlm" {
+        for dialect in crate::execution_settings::RlmDialect::ALL {
+            items.push(
+                CommandPaletteItem::new(
+                    "Session",
+                    format!("New Session: {}", dialect.language_id()),
+                    format!(
+                        "Start a fresh RLM session pinned to {}.",
+                        dialect.language_id()
+                    ),
+                    CommandPaletteAction::NewSession(dialect),
+                )
+                .footer(format!("rlm · {}", dialect.language_id()))
+                .current(app.rlm_dialect_label.as_deref() == Some(dialect.language_id())),
+            );
+        }
+    } else {
+        items.push(
+            CommandPaletteItem::new(
+                "Session",
+                "New Session",
+                "Reset conversation and start fresh.",
+                CommandPaletteAction::Builtin(command::Command::Clear),
+            )
+            .footer("/clear"),
+        );
+    }
+
     items.extend([
-        CommandPaletteItem::new(
-            "Session",
-            "New Session",
-            "Reset conversation and start fresh.",
-            CommandPaletteAction::Builtin(command::Command::Clear),
-        )
-        .footer("/clear"),
         CommandPaletteItem::new(
             "Session",
             "Resume Session",

@@ -1,8 +1,6 @@
 use super::*;
 use crate::assistant_text::push_assistant_text_block;
-#[cfg(test)]
-use lash_core::SessionStreamEvent;
-use lash_core::{AcceptedInjectedTurnInput, PluginRuntimeEvent, TurnActivity, TurnEvent};
+use lash_core::{PluginRuntimeEvent, TurnActivity, TurnEvent, TurnInputApplication};
 
 fn runtime_status_from_plugin_event(
     event: &PluginRuntimeEvent,
@@ -138,23 +136,26 @@ impl App {
         }
     }
 
-    fn accept_injected_turn_input(&mut self, inputs: &[AcceptedInjectedTurnInput]) {
+    fn accept_injected_turn_input(&mut self, applications: &[TurnInputApplication]) {
         self.finalize_live_markdown();
         let mut accepted_user_message = false;
-        for input in inputs {
-            let message = &input.message;
-            if !matches!(message.role, MessageRole::User) {
-                continue;
-            }
-            accepted_user_message = true;
-            if let Some(turn) =
-                self.take_draft_presentation_for_input(input.id.as_deref(), &message.content)
+        let pending = self.pending_turn_input_snapshot().to_vec();
+        for application in applications {
+            if let Some(input) = pending
+                .iter()
+                .find(|input| input.input_id == application.input_id)
+                && let Some(turn) = self.take_prepared_turn_for_pending_input(input)
             {
+                accepted_user_message = true;
                 self.push_prepared_user_input(&turn);
-            } else {
-                self.push_user_input_history_text(message.content.clone());
             }
         }
+        self.remove_pending_turn_inputs(
+            &applications
+                .iter()
+                .map(|application| application.input_id.clone())
+                .collect::<Vec<_>>(),
+        );
         if accepted_user_message {
             self.mark_live_turn_user_input_visible();
             self.keep_latest_user_block_visible();
@@ -234,7 +235,7 @@ impl App {
                 self.live.model_output_chunks.push(ModelOutputChunk {
                     correlation_id: activity.correlation_id,
                     lane: ModelOutputLane::Reasoning,
-                    text: text.clone(),
+                    text: text.to_string(),
                 });
                 self.append_model_output(ModelOutputLane::Reasoning, &text);
             }
@@ -242,7 +243,7 @@ impl App {
                 self.live.model_output_chunks.push(ModelOutputChunk {
                     correlation_id: activity.correlation_id,
                     lane: ModelOutputLane::Assistant,
-                    text: text.clone(),
+                    text: text.to_string(),
                 });
                 self.append_model_output(ModelOutputLane::Assistant, &text);
             }
@@ -438,23 +439,15 @@ impl App {
                     || usage.reasoning_output_tokens > 0
                     || usage.cache_read_input_tokens > 0;
                 self.usage.last_response_usage = usage.clone();
-                self.usage.parent_session_cumulative = cumulative;
-                self.recompute_session_token_usage();
+                self.usage.token_usage = cumulative;
                 if should_clear_live_estimate {
                     self.usage.live_output_chars_estimate = 0;
                     self.usage.live_output_tokens_estimate = 0;
                 }
             }
-            TurnEvent::ChildUsage {
-                session_id,
-                cumulative,
-                ..
-            } => {
-                self.usage
-                    .child_session_cumulatives
-                    .insert(session_id, cumulative);
-                self.recompute_session_token_usage();
-            }
+            // Lash owns child aggregation. The completed `TurnReport` and
+            // `LashSession::usage_report` refresh the UI from canonical data.
+            TurnEvent::ChildUsage { .. } => {}
             TurnEvent::PluginRuntime { plugin_id, event } => {
                 if let Some((status, detail, duration)) = runtime_status_from_plugin_event(&event) {
                     self.set_transient_status(status, detail, duration);
@@ -485,8 +478,8 @@ impl App {
                     self.dirty = true;
                 }
             }
-            TurnEvent::QueuedInputAccepted { inputs, .. } => {
-                self.accept_injected_turn_input(&inputs);
+            TurnEvent::QueuedInputAccepted { applications } => {
+                self.accept_injected_turn_input(&applications);
             }
             TurnEvent::QueuedMessagesCommitted { messages, .. } => {
                 self.commit_injected_messages(&messages);
@@ -527,118 +520,7 @@ impl App {
                 }
             }
             TurnEvent::ToolValue { .. } => {}
+            TurnEvent::ModelCallRecorded { .. } | TurnEvent::ToolIntentOutcome { .. } => {}
         }
     }
-
-    #[cfg(test)]
-    pub fn handle_session_event(&mut self, event: SessionStreamEvent) {
-        if matches!(event, SessionStreamEvent::Done) {
-            self.finalize_live_markdown();
-            self.stop_turn();
-            self.scroll_to_bottom();
-        } else if let SessionStreamEvent::Message { text, kind } = &event
-            && kind == "tool_output"
-        {
-            let current_status = self.live.turn.as_ref().map(|turn| turn.run_state);
-            let stream_active = self.turn_active()
-                || current_status.is_some_and(|status| status == CliRunState::RunningTool);
-            if stream_active {
-                self.push_test_tool_output(text);
-                self.invalidate_live_tool_output_cache();
-                self.mark_visible_output();
-                self.scroll_to_bottom();
-            }
-        } else if let Some(activity) = test_session_event_to_turn_activity(event) {
-            self.handle_turn_activity(activity);
-        }
-    }
-}
-
-#[cfg(test)]
-fn test_session_event_to_turn_activity(event: SessionStreamEvent) -> Option<TurnActivity> {
-    let turn_event = match event {
-        SessionStreamEvent::LlmRequest {
-            protocol_iteration, ..
-        } => TurnEvent::ModelRequestStarted { protocol_iteration },
-        SessionStreamEvent::TextDelta { content } => {
-            TurnEvent::AssistantProseDelta { text: content }
-        }
-        SessionStreamEvent::ReasoningDelta { content } => {
-            TurnEvent::ReasoningDelta { text: content }
-        }
-        SessionStreamEvent::ToolCallStart {
-            call_id,
-            name,
-            args,
-        } => TurnEvent::ToolCallStarted {
-            call_id,
-            name,
-            args,
-            graph_key: None,
-            parent_call_id: None,
-        },
-        SessionStreamEvent::ToolCall {
-            call_id,
-            name,
-            args,
-            output,
-            duration_ms,
-        } => TurnEvent::ToolCallCompleted {
-            call_id,
-            name,
-            args,
-            output,
-            duration_ms,
-            graph_key: None,
-            parent_call_id: None,
-        },
-        SessionStreamEvent::Message { text, kind } if kind == "lashlang_code" => {
-            TurnEvent::CodeBlockStarted {
-                language: "lashlang".to_string(),
-                code: text,
-                graph_key: None,
-            }
-        }
-        SessionStreamEvent::TokenUsage {
-            protocol_iteration,
-            usage,
-            cumulative,
-        } => TurnEvent::Usage {
-            protocol_iteration,
-            usage,
-            cumulative,
-        },
-        SessionStreamEvent::RetryStatus {
-            wait_seconds,
-            attempt,
-            max_attempts,
-            reason,
-            ..
-        } => TurnEvent::RetryStatus {
-            wait_seconds,
-            attempt,
-            max_attempts,
-            reason,
-        },
-        SessionStreamEvent::Error { message, .. } => TurnEvent::Error { message },
-        SessionStreamEvent::PluginEvent { plugin_id, event } => {
-            TurnEvent::PluginRuntime { plugin_id, event }
-        }
-        SessionStreamEvent::InjectedTurnInputAccepted { inputs, checkpoint } => {
-            TurnEvent::QueuedInputAccepted { checkpoint, inputs }
-        }
-        SessionStreamEvent::InjectedMessagesCommitted {
-            messages,
-            checkpoint,
-        } => TurnEvent::QueuedMessagesCommitted {
-            messages,
-            checkpoint,
-        },
-        SessionStreamEvent::Done
-        | SessionStreamEvent::ChildTokenUsage { .. }
-        | SessionStreamEvent::TurnOutcome { .. }
-        | SessionStreamEvent::LlmResponse { .. }
-        | SessionStreamEvent::Message { .. } => return None,
-    };
-    Some(TurnActivity::independent(turn_event))
 }

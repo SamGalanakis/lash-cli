@@ -1,3 +1,4 @@
+//! Schema indexing for MCP discovery.
 #[cfg(feature = "semantic-tool-search")]
 use super::catalog::CatalogTool;
 

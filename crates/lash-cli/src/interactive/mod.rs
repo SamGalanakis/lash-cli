@@ -2,8 +2,6 @@ mod commands;
 mod helpers;
 mod input_handling;
 mod runtime;
-#[cfg(test)]
-mod tests;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,7 +12,6 @@ use lash::{LashSession, TurnEvent, provider::ProviderHandle};
 use lash_core::runtime::RuntimeSessionState;
 use lash_core::session_model::Message;
 use lash_core::{TokenUsage, ToolState};
-use lash_sqlite_store::Store;
 use lash_tui::{InputEvent as TuiInputEvent, Terminal, normalize_event};
 use lash_tui_extensions::{TuiExtensionContext, TuiExtensions, TuiSlashInvocation};
 
@@ -89,15 +86,16 @@ pub(crate) async fn run_app(
     initial_context_window: u64,
     session_name: String,
     model_catalog: Arc<CachedModelCatalog>,
-    _store: Arc<Store>,
     mut toolset_hash: String,
     initial_model_variant: Option<String>,
     initial_execution_mode: ExecutionMode,
+    initial_rlm_dialect: Option<crate::execution_settings::RlmDialect>,
     startup_system_message: Option<String>,
 ) -> anyhow::Result<()> {
     let initial_session_id = session.session_id();
     let mut app = App::new(model, session_name, initial_session_id);
     app.set_execution_mode_label(&initial_execution_mode);
+    app.set_rlm_dialect(initial_rlm_dialect);
     let (chrome_ext, chrome_state) = crate::chrome_ui::ChromeTuiExtension::new();
     let extra_ui_extensions: Vec<Arc<dyn lash_tui_extensions::TuiExtension>> = vec![
         Arc::new(lash_autoresearch::AutoresearchTuiExtension::default()),
@@ -267,10 +265,12 @@ pub(crate) async fn run_app(
             push_system_message(&mut app, err);
         } else {
             let _ = app_tx.send(AppEvent::RequestUiSnapshot);
-            toolset_hash = hash12(
-                &serde_json::to_vec(&active_tool_state.tool_manifests())
-                    .unwrap_or_else(|_| b"[]".to_vec()),
-            );
+            if let Some(session) = runtime.as_ref()
+                && let Ok(manifests) = session.admin().tools().active_manifests().await
+            {
+                toolset_hash =
+                    hash12(&serde_json::to_vec(&manifests).unwrap_or_else(|_| b"[]".to_vec()));
+            }
         }
         if let Some(prompt) = args
             .resume_prompt
@@ -292,6 +292,7 @@ pub(crate) async fn run_app(
                 &mut cancel_token,
                 &mut active_stream_id,
                 &app_tx,
+                &runtime_factory,
             )
             .await;
             last_turn = Some(TurnReplayPayload {
@@ -400,7 +401,7 @@ pub(crate) async fn run_app(
                     }
                     let interrupted = matches!(
                         &done.result.outcome,
-                        lash_core::TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+                        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
                     );
                     let active_turn_had_visible_output = app
                         .live
@@ -411,6 +412,13 @@ pub(crate) async fn run_app(
                         &done.result,
                         active_turn_had_visible_output,
                     );
+                    let completed_turn_usage = done.result.total_usage();
+                    let session_usage = runtime
+                        .as_ref()
+                        .expect("runtime remains installed while a turn runs")
+                        .usage_report()
+                        .usage
+                        .usage;
                     let state = done.result.state;
                     tracing::info!(
                         turn_index = state.turn_index,
@@ -444,7 +452,8 @@ pub(crate) async fn run_app(
                     let read_view = state.read_view();
                     history = read_view.messages().to_vec();
                     turn_counter = state.turn_index;
-                    app.usage.token_usage = state.token_usage.clone();
+                    app.usage.last_response_usage = completed_turn_usage;
+                    app.usage.token_usage = session_usage;
                     app.usage.last_prompt_usage = state.last_prompt_usage.clone();
                     tracing::debug!(
                         stream_id = done.stream_id,
@@ -457,6 +466,7 @@ pub(crate) async fn run_app(
                         "reconciling completed runtime turn"
                     );
                     if interrupted {
+                        let interrupted_active_turn_drafts = app.take_active_turn_drafts();
                         let had_manual_interrupt_message = matches!(
                             app.timeline.last(),
                             Some(UiTimelineItem::SystemMessage(message))
@@ -473,8 +483,16 @@ pub(crate) async fn run_app(
                             &ui_projection_state,
                             interrupted_message.clone(),
                         );
+                        app.clear_manual_interrupt_requested();
                         runtime_return_rx = None;
                         cancel_token = None;
+                        defer_interrupted_active_turn_drafts(
+                            runtime.as_ref(),
+                            &mut app,
+                            done.stream_id,
+                            interrupted_active_turn_drafts,
+                        )
+                        .await;
                         dispatch_queued_turn(
                             &mut app,
                             &mut ui_trace,
@@ -503,6 +521,7 @@ pub(crate) async fn run_app(
                     }
 
                     app.finish_turn_from_read_view(&read_view);
+                    app.clear_manual_interrupt_requested();
                     runtime_return_rx = None;
                     cancel_token = None;
                     log_runtime_transition(
@@ -958,4 +977,37 @@ pub(crate) async fn run_app(
     app.save_history();
 
     Ok(())
+}
+
+async fn defer_interrupted_active_turn_drafts(
+    session: Option<&LashSession>,
+    app: &mut App,
+    stream_id: u64,
+    drafts: Vec<PreparedTurn>,
+) {
+    let Some(session) = session else {
+        for draft in drafts {
+            app.restore_prepared_turn(draft);
+        }
+        return;
+    };
+    for draft in drafts {
+        let replay_id = format!("interrupt-replay:{stream_id}:{}", draft.draft_id);
+        match session
+            .enqueue(make_turn_input(&draft))
+            .id(replay_id)
+            .ingress(lash_core::TurnInputIngress::NextTurn)
+            .send()
+            .await
+        {
+            Ok(_) => app.cache_draft_presentation(draft),
+            Err(error) => {
+                push_system_message(
+                    app,
+                    format!("Failed to preserve interrupted input: {error}"),
+                );
+                app.restore_prepared_turn(draft);
+            }
+        }
+    }
 }

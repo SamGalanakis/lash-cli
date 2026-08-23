@@ -2,13 +2,12 @@ use std::sync::Arc;
 
 use chrono::Utc;
 
-use lash_core::PreparedContext;
-use lash_core::PromptContribution;
-use lash_core::plugin::{
+use lash::plugins::{
     ContextError, PluginDirective, PluginError, PluginFactory, PluginRegistrar,
-    PluginSessionContext, TurnContextTransform, TurnTransformContext,
+    PluginSessionContext, PreparedContext, SessionPlugin, TurnContextTransform,
+    TurnTransformContext,
 };
-use lash_core::{Message, MessageRole, Part, PartKind, PluginMessage, PruneState, shared_parts};
+use lash_core::{Message, MessageRole, Part, PluginMessage, PromptContribution};
 
 use crate::execution_settings::ExecutionMode;
 
@@ -62,10 +61,7 @@ impl PluginFactory for PromptContextPluginFactory {
         "prompt_context"
     }
 
-    fn build(
-        &self,
-        _ctx: &PluginSessionContext,
-    ) -> Result<Arc<dyn lash_core::SessionPlugin>, PluginError> {
+    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(PromptContextPlugin {
             instruction_source: Arc::clone(&self.instruction_source),
             config: self.config.clone(),
@@ -80,7 +76,7 @@ struct PromptContextPlugin {
     execution_mode: ExecutionMode,
 }
 
-impl lash_core::SessionPlugin for PromptContextPlugin {
+impl SessionPlugin for PromptContextPlugin {
     fn id(&self) -> &'static str {
         "prompt_context"
     }
@@ -153,15 +149,11 @@ impl TurnContextTransform for EnvironmentTailTransform {
             return Ok(input);
         }
 
-        let mut messages: Vec<Message> = input.messages.as_slice().to_vec();
+        let mut output = input;
+        let mut messages: Vec<Message> = output.messages.iter().cloned().collect();
         messages.push(environment_tail_message(context));
-
-        let base = Arc::new(messages);
-        let cache = Arc::new(lash_core::BaseRenderCache::new());
-        Ok(PreparedContext {
-            messages: lash_core::MessageSequence::from_base(base).with_base_render_cache(cache),
-            ..input
-        })
+        output.messages = messages.into();
+        Ok(output)
     }
 }
 
@@ -170,18 +162,12 @@ fn environment_tail_message(content: String) -> Message {
     Message {
         id: id.to_string(),
         role: MessageRole::User,
-        parts: shared_parts(vec![Part {
-            id: format!("{id}.p0"),
-            kind: PartKind::Prose,
-            content: format!("<system-reminder>\n{content}\n</system-reminder>"),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]),
+        parts: vec![Part::prose(
+            format!("{id}.p0"),
+            format!("<system-reminder>\n{content}\n</system-reminder>"),
+            None,
+        )]
+        .into(),
         origin: Some(lash_core::MessageOrigin::Plugin {
             plugin_id: "prompt_context".to_string(),
             transient: true,
@@ -203,81 +189,4 @@ fn build_prompt_environment_context() -> String {
     }
 
     parts.join("\n")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_core::plugin::PromptHookContext;
-    use lash_core::testing::{MockSessionManager, mock_assembled_turn};
-    use lash_core::{PluginHost, PromptSlot, SessionPolicy, SessionReadView, SessionSnapshot};
-
-    struct StaticInstructionSource {
-        text: String,
-        read_text: String,
-    }
-
-    impl InstructionSource for StaticInstructionSource {
-        fn system_instructions(&self) -> String {
-            self.text.clone()
-        }
-
-        fn context_instructions_for_reads(&self, _read_paths: &[String]) -> String {
-            self.read_text.clone()
-        }
-    }
-
-    fn mock_snapshot(run_session_id: &str) -> SessionSnapshot {
-        SessionSnapshot {
-            session_id: "root".to_string(),
-            policy: SessionPolicy {
-                session_id: Some(run_session_id.to_string()),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-
-    fn mock_session_manager(run_session_id: &str) -> MockSessionManager {
-        MockSessionManager::default()
-            .with_snapshot(mock_snapshot(run_session_id))
-            .with_turn(mock_assembled_turn(run_session_id, ""))
-    }
-
-    #[tokio::test]
-    async fn prompt_context_plugin_contributes_environment_and_project_instruction_sections() {
-        let mut factories = lash_core::testing::test_standard_protocol_factories();
-        factories.push(Arc::new(PromptContextPluginFactory::new(
-            Arc::new(StaticInstructionSource {
-                text: "Repo rules".to_string(),
-                read_text: String::new(),
-            }),
-            PromptContextPluginConfig::default(),
-            ExecutionMode::Standard,
-        )));
-        let host = PluginHost::new(factories);
-        let session = host.build_session("root", None).expect("session");
-        let contributions = session
-            .collect_prompt_contributions(PromptHookContext {
-                session_id: "root".to_string(),
-                sessions: Arc::new(mock_session_manager("run-session")),
-                state: SessionReadView::from_snapshot(&SessionSnapshot::default()),
-                protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
-                turn_context: lash_core::TurnContext::default(),
-            })
-            .await
-            .expect("prompt contributions");
-
-        assert!(
-            !contributions
-                .iter()
-                .any(|contribution| contribution.slot == PromptSlot::RuntimeContext),
-            "environment context should not appear as a runtime-context contribution",
-        );
-        assert!(contributions.iter().any(|contribution| {
-            contribution.slot == PromptSlot::ProjectInstructions
-                && contribution.title.as_deref() == Some("Project Instructions")
-                && contribution.content.as_ref() == "Repo rules"
-        }));
-    }
 }

@@ -3,17 +3,30 @@
 //! stored/shortcut credential (or `--provider` forces it).
 
 use crate::Args;
-use crate::config::{ConfigLoadOutcome, LashConfig};
+use crate::config::{ConfigLoadOutcome, LashConfig, ProviderConfig};
 use lash::provider::ProviderHandle;
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompatibleProvider, OpenAiProvider};
 
 use super::onboarding;
 
-pub(super) fn openai_shortcut_provider(api_key: String, base_url: &str) -> ProviderHandle {
+#[cfg(test)]
+fn openai_shortcut_provider(api_key: String, base_url: &str) -> ProviderHandle {
+    openai_shortcut(api_key, base_url).1
+}
+
+fn openai_shortcut(api_key: String, base_url: &str) -> (ProviderConfig, ProviderHandle) {
     if base_url.trim().is_empty() {
-        ProviderHandle::new(OpenAiProvider::new(api_key).into_components())
+        let provider = OpenAiProvider::new(api_key);
+        (
+            ProviderConfig::from_provider(&provider),
+            ProviderHandle::new(provider.into_components()),
+        )
     } else {
-        ProviderHandle::new(OpenAiCompatibleProvider::new(api_key, base_url).into_components())
+        let provider = OpenAiCompatibleProvider::new(api_key, base_url);
+        (
+            ProviderConfig::from_provider(&provider),
+            ProviderHandle::new(provider.into_components()),
+        )
     }
 }
 
@@ -75,9 +88,10 @@ pub(super) async fn resolve_config_and_provider(
     let existing_config = load_outcome.loaded().cloned();
     if args.provider || existing_config.is_none() {
         if let Some(key) = shortcut_api_key {
-            let provider = openai_shortcut_provider(key.to_string(), &args.base_url);
-            let mut cfg = existing_config.unwrap_or_else(|| LashConfig::new(&provider));
-            cfg.upsert_provider(&provider);
+            let (provider_config, provider) = openai_shortcut(key.to_string(), &args.base_url);
+            let mut cfg =
+                existing_config.unwrap_or_else(|| LashConfig::new(provider_config.clone()));
+            cfg.upsert_provider(provider_config);
             let _ = cfg.set_active_provider_kind(provider.kind());
             cfg.set_tavily_api_key(args.tavily_api_key.clone());
             return Ok((cfg, provider));
@@ -139,14 +153,15 @@ mod tests {
     fn api_key_shortcut_selects_direct_openai_without_base_url() {
         let provider = openai_shortcut_provider("key".to_string(), "");
         assert_eq!(provider.kind(), "openai");
-        assert_eq!(provider.to_spec().kind, "openai");
-        assert!(provider.to_spec().config.get("base_url").is_none());
+        let config = openai_shortcut("key".to_string(), "").0;
+        assert_eq!(config.kind, "openai");
+        assert!(config.config.get("base_url").is_none());
     }
 
     #[test]
     fn api_key_shortcut_selects_compatible_provider_with_base_url() {
         let provider = openai_shortcut_provider("key".to_string(), "https://example.invalid/v1");
-        let spec = provider.to_spec();
+        let spec = openai_shortcut("key".to_string(), "https://example.invalid/v1").0;
         assert_eq!(provider.kind(), "openai-compatible");
         assert_eq!(spec.kind, "openai-compatible");
         assert_eq!(spec.config["base_url"], "https://example.invalid/v1");
@@ -229,7 +244,7 @@ mod tests {
         let err = resolve_config_and_provider(
             &args,
             std::path::Path::new("/tmp/lash/config.json"),
-            ConfigLoadOutcome::Loaded(LashConfig::new(&openai_shortcut_provider("key".into(), ""))),
+            ConfigLoadOutcome::Loaded(LashConfig::new(openai_shortcut("key".into(), "").0)),
             None,
             false,
         )

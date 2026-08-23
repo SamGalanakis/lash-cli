@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use crate::config::LashConfig;
+use crate::config::{LashConfig, ProviderConfig};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use lash_core::provider::ProviderHandle;
+use lash::provider::ProviderHandle;
 use lash_provider_anthropic::AnthropicProvider;
 use lash_provider_auth as oauth;
-use lash_provider_google::GoogleOAuthProvider;
 use lash_provider_google::oauth as google_oauth;
+use lash_provider_google::{GoogleOAuthClient, GoogleOAuthProvider};
 use lash_provider_openai::codex::oauth as codex_oauth;
 use lash_provider_openai::{CodexProvider, OpenAiCompatibleProvider, OpenAiProvider};
 use lash_tui::{Frame, Line, Modifier, Rect, Span, Style, Terminal};
@@ -50,6 +50,12 @@ enum SetupStep {
     InputTavily {
         input: String,
         cursor: usize,
+    },
+    SelectExecutionMode {
+        selected: usize,
+    },
+    SelectRlmDialect {
+        selected: usize,
     },
     Done,
 }
@@ -99,8 +105,15 @@ async fn run_setup_inner(
 ) -> anyhow::Result<LashConfig> {
     let existing_config = existing.cloned();
     let mut app = SetupApp::new(existing_config.as_ref());
-    let mut provider: Option<ProviderHandle> = None;
+    let mut provider: Option<(ProviderConfig, ProviderHandle)> = None;
     let mut tavily_key = existing.and_then(|cfg| cfg.tavily_api_key().map(str::to_string));
+    let mut selected_execution_mode = existing
+        .map(|config| config.execution_mode)
+        .unwrap_or_default();
+    let mut selected_rlm_dialect = existing
+        .map(|config| config.rlm_dialect)
+        .unwrap_or_default();
+    let default_execution_mode = selected_execution_mode;
     let existing_agent_models = existing
         .map(|cfg| cfg.agent_models.clone())
         .unwrap_or_default();
@@ -173,23 +186,18 @@ async fn run_setup_inner(
                 Ok(Some((auth_code, code_verifier))) => {
                     match codex_oauth::exchange_code(&auth_code, &code_verifier).await {
                         Ok(tokens) => {
-                            provider = Some(ProviderHandle::new(
-                                CodexProvider::new(
-                                    tokens.access_token,
-                                    tokens.refresh_token,
-                                    tokens.expires_at,
-                                )
-                                .with_account_id(tokens.account_id)
-                                .into_components(),
+                            let concrete = CodexProvider::new(
+                                tokens.access_token,
+                                tokens.refresh_token,
+                                tokens.expires_at,
+                            )
+                            .with_account_id(tokens.account_id);
+                            provider = Some((
+                                ProviderConfig::from_provider(&concrete),
+                                ProviderHandle::new(concrete.into_components()),
                             ));
-                            app.step = if tavily_key.is_some() {
-                                SetupStep::Done
-                            } else {
-                                SetupStep::InputTavily {
-                                    input: String::new(),
-                                    cursor: 0,
-                                }
-                            };
+                            app.step =
+                                next_setup_step(tavily_key.is_some(), default_execution_mode);
                         }
                         Err(err) => {
                             if let SetupStep::CodexDeviceAuth { error, .. } = &mut app.step {
@@ -253,21 +261,15 @@ async fn run_setup_inner(
                     let kind = crate::provider_metadata::PROVIDER_SETUP_ORDER[*selected];
                     if let Some(saved_spec) = existing_config
                         .as_ref()
-                        .and_then(|cfg| cfg.provider_spec(kind))
+                        .and_then(|cfg| cfg.provider_config(kind))
                         .cloned()
                     {
-                        match crate::config::materialize_provider_spec(&saved_spec) {
+                        match crate::config::materialize_provider(&saved_spec) {
                             Ok(handle) => {
-                                provider = Some(handle);
+                                provider = Some((saved_spec, handle));
                                 app.active_kind = Some(kind.to_string());
-                                app.step = if tavily_key.is_some() {
-                                    SetupStep::Done
-                                } else {
-                                    SetupStep::InputTavily {
-                                        input: String::new(),
-                                        cursor: 0,
-                                    }
-                                };
+                                app.step =
+                                    next_setup_step(tavily_key.is_some(), default_execution_mode);
                             }
                             Err(_) => {
                                 start_provider_flow(&mut app, kind, existing_config.as_ref()).await;
@@ -306,34 +308,26 @@ async fn run_setup_inner(
                                 *error = Some("API key cannot be empty.".into());
                                 continue;
                             }
-                            provider = Some(ProviderHandle::new(
-                                AnthropicProvider::new(value).into_components(),
+                            let concrete = AnthropicProvider::new(value);
+                            provider = Some((
+                                ProviderConfig::from_provider(&concrete),
+                                ProviderHandle::new(concrete.into_components()),
                             ));
-                            app.step = if tavily_key.is_some() {
-                                SetupStep::Done
-                            } else {
-                                SetupStep::InputTavily {
-                                    input: String::new(),
-                                    cursor: 0,
-                                }
-                            };
+                            app.step =
+                                next_setup_step(tavily_key.is_some(), default_execution_mode);
                         }
                         CredentialMode::OpenAiKey => {
                             if value.is_empty() {
                                 *error = Some("API key cannot be empty.".into());
                                 continue;
                             }
-                            provider = Some(ProviderHandle::new(
-                                OpenAiProvider::new(value).into_components(),
+                            let concrete = OpenAiProvider::new(value);
+                            provider = Some((
+                                ProviderConfig::from_provider(&concrete),
+                                ProviderHandle::new(concrete.into_components()),
                             ));
-                            app.step = if tavily_key.is_some() {
-                                SetupStep::Done
-                            } else {
-                                SetupStep::InputTavily {
-                                    input: String::new(),
-                                    cursor: 0,
-                                }
-                            };
+                            app.step =
+                                next_setup_step(tavily_key.is_some(), default_execution_mode);
                         }
                         CredentialMode::OpenAiCompatibleKey => {
                             if value.is_empty() {
@@ -355,33 +349,52 @@ async fn run_setup_inner(
                                 *error = Some("OAuth state expired. Press Esc and retry.".into());
                                 continue;
                             };
-                            match google_oauth::exchange_code(&value, &verifier_value).await {
+                            let oauth_client = match google_oauth_client_from_env() {
+                                Ok(client) => client,
+                                Err(message) => {
+                                    *error = Some(message);
+                                    continue;
+                                }
+                            };
+                            match google_oauth::exchange_code(
+                                &oauth_client,
+                                &value,
+                                &verifier_value,
+                            )
+                            .await
+                            {
                                 Ok(tokens) => {
                                     let project_id = std::env::var("GOOGLE_CLOUD_PROJECT")
                                         .ok()
                                         .or_else(|| std::env::var("GOOGLE_CLOUD_PROJECT_ID").ok());
-                                    provider = Some(ProviderHandle::new(
-                                        GoogleOAuthProvider::new(
-                                            tokens.access_token,
-                                            tokens.refresh_token,
-                                            tokens.expires_at,
-                                        )
-                                        .with_project_id(project_id)
-                                        .into_components(),
+                                    let concrete = GoogleOAuthProvider::new(
+                                        tokens.access_token,
+                                        tokens.refresh_token,
+                                        tokens.expires_at,
+                                        oauth_client,
+                                    )
+                                    .with_project_id(project_id);
+                                    provider = Some((
+                                        ProviderConfig::from_provider(&concrete),
+                                        ProviderHandle::new(concrete.into_components()),
                                     ));
-                                    app.step = if tavily_key.is_some() {
-                                        SetupStep::Done
-                                    } else {
-                                        SetupStep::InputTavily {
-                                            input: String::new(),
-                                            cursor: 0,
-                                        }
-                                    };
+                                    app.step = next_setup_step(
+                                        tavily_key.is_some(),
+                                        default_execution_mode,
+                                    );
                                 }
                                 Err(err) => {
                                     *error = Some(err.to_string());
                                     let (new_verifier, challenge) = oauth::generate_pkce();
-                                    match google_oauth::authorize_url(&challenge) {
+                                    let oauth_client = match google_oauth_client_from_env() {
+                                        Ok(client) => client,
+                                        Err(auth_err) => {
+                                            *error = Some(auth_err);
+                                            continue;
+                                        }
+                                    };
+                                    match google_oauth::authorize_url(&oauth_client.id, &challenge)
+                                    {
                                         Ok(url) => {
                                             persist_oauth_url(&url);
                                             *browser_error =
@@ -424,17 +437,12 @@ async fn run_setup_inner(
                     if base_url.is_empty() {
                         continue;
                     }
-                    provider = Some(ProviderHandle::new(
-                        OpenAiCompatibleProvider::new(api_key.clone(), base_url).into_components(),
+                    let concrete = OpenAiCompatibleProvider::new(api_key.clone(), base_url);
+                    provider = Some((
+                        ProviderConfig::from_provider(&concrete),
+                        ProviderHandle::new(concrete.into_components()),
                     ));
-                    app.step = if tavily_key.is_some() {
-                        SetupStep::Done
-                    } else {
-                        SetupStep::InputTavily {
-                            input: String::new(),
-                            cursor: 0,
-                        }
-                    };
+                    app.step = next_setup_step(tavily_key.is_some(), default_execution_mode);
                 }
                 KeyCode::Char(ch) => {
                     input.insert(*cursor, ch);
@@ -445,7 +453,7 @@ async fn run_setup_inner(
             SetupStep::InputTavily { input, cursor } => match key.code {
                 KeyCode::Esc => {
                     tavily_key = None;
-                    app.step = SetupStep::Done;
+                    app.step = execution_mode_step(default_execution_mode);
                 }
                 KeyCode::Backspace => delete_left(input, cursor),
                 KeyCode::Left => move_left(input, cursor),
@@ -453,7 +461,7 @@ async fn run_setup_inner(
                 KeyCode::Enter => {
                     let value = input.trim().to_string();
                     tavily_key = if value.is_empty() { None } else { Some(value) };
-                    app.step = SetupStep::Done;
+                    app.step = execution_mode_step(default_execution_mode);
                 }
                 KeyCode::Char(ch) => {
                     input.insert(*cursor, ch);
@@ -461,19 +469,83 @@ async fn run_setup_inner(
                 }
                 _ => {}
             },
+            SetupStep::SelectExecutionMode { selected } => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                KeyCode::Down | KeyCode::Char('j') => *selected = (*selected + 1).min(1),
+                KeyCode::Enter => {
+                    selected_execution_mode = if *selected == 0 {
+                        crate::execution_settings::ExecutionMode::Standard
+                    } else {
+                        crate::execution_settings::ExecutionMode::Rlm
+                    };
+                    app.step = if selected_execution_mode.is_rlm() {
+                        dialect_step(selected_rlm_dialect)
+                    } else {
+                        SetupStep::Done
+                    };
+                }
+                _ => {}
+            },
+            SetupStep::SelectRlmDialect { selected } => match key.code {
+                KeyCode::Up | KeyCode::Char('k') => *selected = selected.saturating_sub(1),
+                KeyCode::Down | KeyCode::Char('j') => {
+                    *selected = (*selected + 1).min(
+                        crate::execution_settings::RlmDialect::ALL
+                            .len()
+                            .saturating_sub(1),
+                    );
+                }
+                KeyCode::Enter => {
+                    selected_rlm_dialect = crate::execution_settings::RlmDialect::ALL[*selected];
+                    app.step = SetupStep::Done;
+                }
+                KeyCode::Esc => app.step = execution_mode_step(selected_execution_mode),
+                _ => {}
+            },
             SetupStep::CodexDeviceAuth { .. } | SetupStep::Done => {}
         }
     }
 
-    let provider = provider.expect("provider must be selected before setup finishes");
-    let mut config = existing_config.unwrap_or_else(|| LashConfig::new(&provider));
-    config.upsert_provider(&provider);
+    let (provider_config, provider) =
+        provider.expect("provider must be selected before setup finishes");
+    let mut config = existing_config.unwrap_or_else(|| LashConfig::new(provider_config.clone()));
+    config.upsert_provider(provider_config);
     config
         .set_active_provider_kind(provider.kind())
         .expect("active provider must exist after upsert");
     config.set_tavily_api_key(tavily_key);
+    config.execution_mode = selected_execution_mode;
+    config.rlm_dialect = selected_rlm_dialect;
     config.agent_models = existing_agent_models;
     Ok(config)
+}
+
+fn execution_mode_step(mode: crate::execution_settings::ExecutionMode) -> SetupStep {
+    SetupStep::SelectExecutionMode {
+        selected: usize::from(mode.is_rlm()),
+    }
+}
+
+fn dialect_step(dialect: crate::execution_settings::RlmDialect) -> SetupStep {
+    let selected = crate::execution_settings::RlmDialect::ALL
+        .iter()
+        .position(|candidate| *candidate == dialect)
+        .unwrap_or_default();
+    SetupStep::SelectRlmDialect { selected }
+}
+
+fn next_setup_step(
+    tavily_is_configured: bool,
+    execution_mode: crate::execution_settings::ExecutionMode,
+) -> SetupStep {
+    if tavily_is_configured {
+        execution_mode_step(execution_mode)
+    } else {
+        SetupStep::InputTavily {
+            input: String::new(),
+            cursor: 0,
+        }
+    }
 }
 
 async fn start_provider_flow(app: &mut SetupApp, kind: &str, existing: Option<&LashConfig>) {
@@ -501,7 +573,22 @@ async fn start_provider_flow(app: &mut SetupApp, kind: &str, existing: Option<&L
         },
         "google_oauth" => {
             let (verifier, challenge) = oauth::generate_pkce();
-            match google_oauth::authorize_url(&challenge) {
+            let oauth_client = match google_oauth_client_from_env() {
+                Ok(client) => client,
+                Err(error) => {
+                    app.step = SetupStep::InputCredential {
+                        input: String::new(),
+                        cursor: 0,
+                        error: Some(error.to_string()),
+                        verifier: None,
+                        auth_url: None,
+                        browser_error: None,
+                        mode: CredentialMode::GoogleOAuth,
+                    };
+                    return;
+                }
+            };
+            match google_oauth::authorize_url(&oauth_client.id, &challenge) {
                 Ok(url) => {
                     persist_oauth_url(&url);
                     let browser_error = open_browser(&url).err().map(|err| err.to_string());
@@ -804,6 +891,66 @@ fn draw_setup(frame: &mut Frame<'_>, app: &SetupApp) {
                     help: &[("enter", "save"), ("esc", "skip"), ("ctrl+c", "quit")],
                 },
             );
+        }
+        SetupStep::SelectExecutionMode { selected } => {
+            draw_panel_title(frame, panel, "Execution Mode");
+            let choices = [
+                ("Standard", "Use the standard tool-calling protocol."),
+                ("RLM", "Run model-authored programs in a pinned language."),
+            ];
+            let mut lines = vec![
+                Line::from("Choose the default for newly created sessions."),
+                Line::from(""),
+            ];
+            for (index, (label, description)) in choices.iter().enumerate() {
+                let marker = if *selected == index { "▸" } else { " " };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("{marker} {label:<12}"),
+                        if *selected == index {
+                            Style::default()
+                                .fg(theme::text_primary())
+                                .add_modifier(Modifier::Bold)
+                        } else {
+                            Style::default().fg(theme::text_subtle())
+                        },
+                    ),
+                    Span::styled(*description, Style::default().fg(theme::text_faint())),
+                ]));
+            }
+            lines.push(Line::from(""));
+            lines.push(help_line(&[("↑↓", "move"), ("enter", "select")]));
+            draw_lines(frame, inner_panel(panel), &lines);
+        }
+        SetupStep::SelectRlmDialect { selected } => {
+            draw_panel_title(frame, panel, "RLM Dialect");
+            let mut lines = vec![
+                Line::from("Choose the language pinned to each new RLM session."),
+                Line::from(""),
+            ];
+            for (index, dialect) in crate::execution_settings::RlmDialect::ALL
+                .iter()
+                .enumerate()
+            {
+                let marker = if *selected == index { "▸" } else { " " };
+                lines.push(Line::from(Span::styled(
+                    format!("{marker} {}", dialect.language_id()),
+                    if *selected == index {
+                        Style::default()
+                            .fg(theme::text_primary())
+                            .add_modifier(Modifier::Bold)
+                    } else {
+                        Style::default().fg(theme::text_subtle())
+                    },
+                )));
+            }
+            lines.push(Line::from(""));
+            lines.push(help_line(&[
+                ("↑↓", "move"),
+                ("enter", "select"),
+                ("esc", "back"),
+            ]));
+            draw_lines(frame, inner_panel(panel), &lines);
         }
         SetupStep::Done => {
             draw_panel_title(frame, panel, "Ready");
@@ -1119,7 +1266,7 @@ fn visible_start(input: &str, width: usize, cursor_byte: usize) -> usize {
 
 fn provider_spec_field(existing: Option<&LashConfig>, kind: &str, field: &str) -> String {
     existing
-        .and_then(|cfg| cfg.provider_spec(kind))
+        .and_then(|cfg| cfg.provider_config(kind))
         .and_then(|spec| {
             spec.config
                 .get(field)
@@ -1127,6 +1274,19 @@ fn provider_spec_field(existing: Option<&LashConfig>, kind: &str, field: &str) -
                 .map(String::from)
         })
         .unwrap_or_default()
+}
+
+fn google_oauth_client_from_env() -> Result<GoogleOAuthClient, String> {
+    let id = std::env::var("LASH_GOOGLE_CLIENT_ID").ok();
+    let secret = std::env::var("LASH_GOOGLE_CLIENT_SECRET").ok();
+    match (id, secret) {
+        (Some(id), Some(secret)) if !id.trim().is_empty() && !secret.trim().is_empty() => {
+            Ok(GoogleOAuthClient { id, secret })
+        }
+        _ => Err(
+            "Google setup requires LASH_GOOGLE_CLIENT_ID and LASH_GOOGLE_CLIENT_SECRET".to_string(),
+        ),
+    }
 }
 
 fn existing_openai_base_url(existing: Option<&LashConfig>) -> String {

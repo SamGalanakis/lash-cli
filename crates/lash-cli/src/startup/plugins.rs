@@ -11,9 +11,8 @@ use lash::prompt::{
 };
 use lash::{ModelSpec, PluginStack, SessionSpec};
 use lash_core::plugin::{PluginSpec, StaticPluginFactory};
-use lash_core::{PromptLayer, SessionToolAccess, ToolProvider, ToolState};
+use lash_core::{PromptLayer, SessionToolAccess, ToolProvider};
 use lash_llm_tools::LlmToolsPluginFactory;
-use lash_plugin_plan_mode::{PlanModePluginFactory, UpdatePlanPluginFactory};
 use lash_search_tools::grep_provider;
 use lash_standard_plugins::{
     StandardContextApproach, StandardToolStackOptions, standard_tool_stack,
@@ -32,7 +31,6 @@ const CLI_AUTONOMOUS_EXECUTION: &str = "- No user is available during this run. 
 pub(super) struct PluginFactorySurfaceInput<'a> {
     pub(super) autonomous: bool,
     pub(super) execution_mode: ExecutionMode,
-    pub(super) standard_context_approach: Option<StandardContextApproach>,
     pub(super) tavily_key: String,
     pub(super) instruction_source: Arc<dyn InstructionSource>,
     pub(super) agent_model_specs: &'a BTreeMap<String, ModelSpec>,
@@ -44,7 +42,6 @@ pub(super) fn plugin_factories_for_surface(input: PluginFactorySurfaceInput<'_>)
     let PluginFactorySurfaceInput {
         autonomous,
         execution_mode,
-        standard_context_approach,
         tavily_key,
         instruction_source,
         agent_model_specs,
@@ -54,7 +51,9 @@ pub(super) fn plugin_factories_for_surface(input: PluginFactorySurfaceInput<'_>)
     let capability_registry = Arc::new(default_registry(agent_model_specs));
 
     let runtime_options = StandardToolStackOptions {
-        standard_context_approach: standard_context_approach.clone(),
+        standard_context_approach: execution_mode
+            .is_standard()
+            .then(|| StandardContextApproach::RollingHistory(Default::default())),
         include_cancel_process: execution_mode.is_standard(),
         tavily_api_key: if tavily_key.is_empty() {
             None
@@ -76,16 +75,12 @@ pub(super) fn plugin_factories_for_surface(input: PluginFactorySurfaceInput<'_>)
                     as Arc<dyn PluginFactory>,
             );
         }
-        plugin_stack.push(Arc::new(
-            PlanModePluginFactory::new(Default::default())
-                .with_prompt(Arc::new(prompt_bridge.clone())),
-        ));
         plugin_stack.push(cli_ask_plugin_factory(prompt_bridge));
         // `update_plan` drives the sticky plan dock at the bottom of
         // the TUI. Interactive-only here; root-only inside the plugin
         // itself (the factory returns an inert plugin for subagent
         // / compaction / other non-root sessions).
-        plugin_stack.push(Arc::new(UpdatePlanPluginFactory));
+        plugin_stack.push(Arc::new(crate::plan_plugin::UpdatePlanPluginFactory));
     }
     plugin_stack.push(Arc::new(lash_autoresearch::AutoresearchPluginFactory));
     if execution_mode.is_rlm() {
@@ -135,29 +130,18 @@ fn autonomous_tool_allowed(name: &str) -> bool {
 pub(super) async fn apply_autonomous_tool_policy(
     session: &lash::LashSession,
 ) -> anyhow::Result<()> {
-    let mut snapshot = session.admin().tools().state().await?;
-    apply_autonomous_tool_membership(&mut snapshot);
-    session
-        .admin()
-        .tools()
-        .advanced()
-        .apply_state(snapshot)
-        .await?;
-    Ok(())
-}
-
-fn apply_autonomous_tool_membership(snapshot: &mut ToolState) {
-    let disallowed = snapshot
-        .iter()
-        .filter(|(_, entry)| !autonomous_tool_allowed(&entry.manifest().name))
-        .map(|(id, _)| id.clone())
+    let tools = session.admin().tools();
+    let updates = tools
+        .active_manifests()
+        .await?
+        .into_iter()
+        .filter(|manifest| !autonomous_tool_allowed(&manifest.name))
+        .map(|manifest| (manifest.id, false))
         .collect::<Vec<_>>();
-
-    for id in disallowed {
-        snapshot
-            .set_membership(&id, false)
-            .expect("tool id collected from the same snapshot");
+    if !updates.is_empty() {
+        tools.set_membership_many(&updates).await?;
     }
+    Ok(())
 }
 
 pub(crate) fn cli_prompt_config(autonomous: bool, _execution_mode: &ExecutionMode) -> PromptLayer {
@@ -207,61 +191,12 @@ pub(crate) fn cli_prompt_config(autonomous: bool, _execution_mode: &ExecutionMod
 mod tests {
     use super::*;
     use crate::instructions::FsInstructionSource;
-    use lash::tools::{
-        ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolProvider, ToolResult,
-        ToolScheduling,
-    };
-    use lash_core::ToolRegistry;
-
-    struct CatalogFixtureProvider;
-
-    fn fixture_tool(name: &str) -> ToolDefinition {
-        ToolDefinition::raw(
-            format!("tool:{name}"),
-            name,
-            format!("{name} description"),
-            ToolDefinition::default_input_schema(),
-            serde_json::json!({ "type": "null" }),
-        )
-        .with_scheduling(ToolScheduling::Parallel)
-    }
-
-    #[async_trait::async_trait]
-    impl ToolProvider for CatalogFixtureProvider {
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
-            fixture_tools()
-                .into_iter()
-                .map(|tool| tool.manifest())
-                .collect()
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<std::sync::Arc<ToolContract>> {
-            fixture_tools()
-                .into_iter()
-                .find(|tool| tool.name() == name)
-                .map(|tool| std::sync::Arc::new(tool.contract()))
-        }
-
-        async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
-            ToolResult::err_fmt(format_args!("unexpected tool call: {}", call.name))
-        }
-    }
-
-    fn fixture_tools() -> Vec<ToolDefinition> {
-        vec![
-            fixture_tool("read_file"),
-            fixture_tool("ask"),
-            fixture_tool("plan_exit"),
-            fixture_tool("showcase"),
-        ]
-    }
 
     fn plugin_factory_ids_for_autonomous(autonomous: bool) -> Vec<&'static str> {
         let agent_model_specs = BTreeMap::new();
         plugin_factories_for_surface(PluginFactorySurfaceInput {
             autonomous,
             execution_mode: ExecutionMode::Standard,
-            standard_context_approach: None,
             tavily_key: String::new(),
             instruction_source: Arc::new(FsInstructionSource::default()),
             agent_model_specs: &agent_model_specs,
@@ -387,20 +322,10 @@ mod tests {
 
     #[test]
     fn autonomous_policy_disables_interactive_tools() {
-        let tool_registry =
-            ToolRegistry::from_tool_provider(Arc::new(CatalogFixtureProvider)).unwrap();
-
-        let mut snapshot = tool_registry.export_state();
-        apply_autonomous_tool_membership(&mut snapshot);
-        let is_member = |id| {
-            snapshot
-                .get(&lash_core::ToolId::from(id))
-                .is_some_and(lash_core::ToolStateEntry::is_member)
-        };
-        assert!(is_member("tool:read_file"));
-        assert!(!is_member("tool:ask"));
-        assert!(!is_member("tool:plan_exit"));
-        assert!(!is_member("tool:showcase"));
+        assert!(autonomous_tool_allowed("read_file"));
+        assert!(!autonomous_tool_allowed("ask"));
+        assert!(!autonomous_tool_allowed("plan_exit"));
+        assert!(!autonomous_tool_allowed("showcase"));
     }
 
     #[test]

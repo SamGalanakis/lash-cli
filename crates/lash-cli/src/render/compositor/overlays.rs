@@ -198,9 +198,13 @@ fn draw_session_picker(frame: &mut Frame<'_>, app: &App, history_area: Rect) {
     }
     let filtered_indices = picker.filtered_indices();
     let match_count = filtered_indices.len();
-    let max_list_height = history_area.height.saturating_sub(4).max(1) as usize;
+    let notice_rows = u16::from(picker.incompatible_session_count > 0);
+    let max_list_height = history_area
+        .height
+        .saturating_sub(4 + notice_rows)
+        .max(1) as usize;
     let list_height = match_count.clamp(1, 15).min(max_list_height) as u16;
-    let height = list_height + 4; // title + search + list + footer
+    let height = list_height + 4 + notice_rows; // title + search + notice + list + footer
     draw_overlay_scrim(frame, history_area);
     let popup = centered_rect(history_area, width, height);
     frame.draw_box(
@@ -233,10 +237,24 @@ fn draw_session_picker(frame: &mut Frame<'_>, app: &App, history_area: Rect) {
         popup.width.saturating_sub(4),
     );
 
-    if picker.items.is_empty() {
+    if picker.incompatible_session_count > 0 {
         frame.write_text(
             popup.x + 2,
             popup.y + 2,
+            &format!(
+                "{} sessions from an older Lash are not openable",
+                picker.incompatible_session_count
+            ),
+            theme::text_faint_style(),
+            popup.width.saturating_sub(4),
+        );
+    }
+    let list_y = popup.y + 2 + notice_rows;
+
+    if picker.items.is_empty() {
+        frame.write_text(
+            popup.x + 2,
+            list_y,
             "No sessions yet",
             theme::text_faint_style(),
             popup.width.saturating_sub(4),
@@ -244,7 +262,7 @@ fn draw_session_picker(frame: &mut Frame<'_>, app: &App, history_area: Rect) {
     } else if match_count == 0 {
         frame.write_text(
             popup.x + 2,
-            popup.y + 2,
+            list_y,
             "No matching sessions",
             theme::text_faint_style(),
             popup.width.saturating_sub(4),
@@ -305,7 +323,7 @@ fn draw_session_picker(frame: &mut Frame<'_>, app: &App, history_area: Rect) {
             };
             frame.write_text(
                 popup.x + 1,
-                popup.y + 2 + row as u16,
+                list_y + row as u16,
                 &line,
                 style,
                 popup.width.saturating_sub(2),

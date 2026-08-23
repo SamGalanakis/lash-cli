@@ -38,15 +38,6 @@ impl App {
         self.editor.next_image_marker_id()
     }
 
-    #[cfg(test)]
-    pub fn add_pending_image(&mut self, png_bytes: Vec<u8>) -> usize {
-        let id = self.next_image_marker_id();
-        self.editor
-            .pending_images
-            .push(PendingImage { id, png_bytes });
-        id
-    }
-
     pub fn begin_pending_image(&mut self, id: usize) {
         self.editor.begin_pending_image(id);
     }

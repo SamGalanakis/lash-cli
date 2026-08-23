@@ -27,7 +27,13 @@ fn save_model_default(
 ) {
     let mut cfg = match LashConfig::load(&crate::paths::config_file()) {
         Some(cfg) => cfg,
-        None => LashConfig::new(provider),
+        None => {
+            push_system_message(
+                app,
+                "Model updated, but no provider config is available to save the default.",
+            );
+            return;
+        }
     };
     cfg.set_model_default(provider.kind(), model.to_string(), variant);
     if let Err(err) = cfg.save(&crate::paths::config_file()) {
@@ -40,10 +46,9 @@ fn save_model_default(
 
 fn persist_provider_config(
     cfg: &mut LashConfig,
-    provider: &ProviderHandle,
+    _provider: &ProviderHandle,
     path: &std::path::Path,
 ) -> std::io::Result<()> {
-    cfg.upsert_provider(provider);
     cfg.save(path)
 }
 
@@ -205,7 +210,14 @@ pub(super) fn handle_mode(
             app,
             format!(
                 "Current execution mode: `{}`\nThis is locked for the current session.\nStart a new session to use a different mode.\nUsage: `/mode {}`",
-                execution_mode_label(current_execution_mode),
+                if let Some(dialect) = app.rlm_dialect_label.as_deref() {
+                    format!(
+                        "{} · {dialect}",
+                        execution_mode_label(current_execution_mode)
+                    )
+                } else {
+                    execution_mode_label(current_execution_mode).to_string()
+                },
                 execution_mode_usage()
             ),
         );
@@ -512,19 +524,20 @@ mod tests {
         let temp = TempDirGuard::new("lash-provider-persist");
         let _lash_home = EnvVarGuard::set("LASH_HOME", temp.path());
         let path = crate::paths::config_file();
-        let provider = lash_core::testing::TestProvider::builder()
+        let concrete = lash_core::testing::TestProvider::builder()
             .kind("persist-provider")
             .serialize_config(|| serde_json::json!({ "token": "refreshed" }))
-            .build()
-            .into_handle();
-        let mut cfg = LashConfig::new(&provider);
+            .build();
+        let provider_config = crate::config::ProviderConfig::from_provider(&concrete);
+        let provider = concrete.into_handle();
+        let mut cfg = LashConfig::new(provider_config);
 
         persist_provider_config(&mut cfg, &provider, &path).expect("persist provider config");
 
         let saved = LashConfig::load(&path).expect("saved config");
         assert_eq!(saved.active_provider_kind(), "persist-provider");
         let spec = saved
-            .provider_spec("persist-provider")
+            .provider_config("persist-provider")
             .expect("provider spec");
         assert_eq!(
             spec.config.get("token").and_then(serde_json::Value::as_str),

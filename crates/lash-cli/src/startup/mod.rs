@@ -7,8 +7,7 @@
 //!    when no stored/shortcut credential exists) — [`provider`]
 //! 3. resolve the startup model against the models.dev catalog
 //! 4. open the session bootstrap (store + sidecars) exactly once
-//! 5. resolve execution mode / context approach from flags + persisted host
-//!    config
+//! 5. resolve execution mode / RLM dialect from flags + persisted host config
 //! 6. assemble the plugin stack and prompt layer — [`plugins`]
 //! 7. build the `LashCore` and open/resume the session — [`session`]
 //! 8. hand off to the autonomous runner or the interactive TUI
@@ -18,9 +17,6 @@ mod plugins;
 mod preflight;
 mod provider;
 pub(crate) mod session;
-
-#[cfg(all(test, feature = "test-provider"))]
-pub(crate) use plugins::cli_prompt_config;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -38,8 +34,8 @@ use serde_json::Value as JsonValue;
 use crate::autonomous::{AutonomousMode, AutonomousPersistenceContext, run_autonomous};
 use crate::config::LashConfig;
 use crate::execution_settings::{
-    ExecutionMode, OmOverrides, RlmTerminationMode, default_rlm_termination_for_mode,
-    ensure_supported_execution_mode, parse_execution_mode, parse_standard_context_approach,
+    ExecutionMode, RlmDialect, RlmTerminationMode, default_rlm_termination_for_mode,
+    ensure_supported_execution_mode, parse_execution_mode,
 };
 use crate::info::{info_text, info_text_unconfigured};
 use crate::instructions::{FsInstructionSource, InstructionLoaderConfig};
@@ -235,9 +231,19 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     if preflight::handle_early_exit_flags(&args).await? {
         return Ok(());
     }
+    let store_preflight = preflight::probe_runtime_store().await?;
 
     // ── Stage 1: resolve config + provider credentials ──
     let config_path = crate::paths::config_file();
+    let config_declares_rlm_dialect = std::fs::read(&config_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|value| {
+            value
+                .as_object()
+                .map(|object| object.contains_key("rlm_dialect"))
+        })
+        .unwrap_or(false);
     let config_load = LashConfig::load_outcome(&config_path);
     let existing_config = config_load.loaded().cloned();
     let shortcut_api_key = provider::shortcut_api_key(&args);
@@ -255,6 +261,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         if let Some(status) = config_load.status_line() {
             println!("{status}");
         }
+        println!("preflight: {}", store_preflight.outcome.name());
         println!("{}", info_text_unconfigured(&execution_mode, &cwd));
         return Ok(());
     }
@@ -382,7 +389,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         .as_ref()
         .and_then(|bootstrap| bootstrap.persisted_host_config());
 
-    // ── Stage 4: execution mode + context approach. CLI flag wins, then
+    // ── Stage 4: execution mode + dialect. CLI flag wins, then
     // persisted host config, then Standard. Resolved BEFORE building the
     // plugin host + runtime so the lashlang thread starts correctly and
     // plugins see the right mode on resume. ──
@@ -394,29 +401,40 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         None => persisted_host_config
             .as_ref()
             .map(|config| config.execution_mode)
-            .and_then(|mode| ensure_supported_execution_mode(mode).ok())
-            .unwrap_or(ExecutionMode::Standard),
+            .unwrap_or(lash_config.execution_mode),
     };
-    let om_overrides = OmOverrides::from_args(&args);
-    if !execution_mode.is_standard()
-        && (args.standard_context_approach.is_some() || !om_overrides.is_empty())
-    {
+    if args.rlm_dialect.is_some() && execution_mode.is_standard() {
         return Err(anyhow::anyhow!(
-            "`--context-approach` and OM tuning flags only apply to `--execution-mode standard`."
+            "`--rlm-dialect` requires `--execution-mode rlm`."
         ));
     }
-    let configured_standard_context_approach = if execution_mode.is_standard() {
-        let approach = match args.standard_context_approach.as_deref() {
-            Some(raw) => parse_standard_context_approach(raw).map_err(anyhow::Error::msg)?,
-            None => persisted_host_config
-                .as_ref()
-                .and_then(|config| config.standard_context_approach.clone())
-                .unwrap_or_default(),
-        };
-        Some(om_overrides.apply(approach).map_err(anyhow::Error::msg)?)
-    } else {
-        None
-    };
+    if let (Some(requested), Some(recorded)) = (
+        args.rlm_dialect,
+        persisted_host_config
+            .as_ref()
+            .and_then(|config| config.rlm_dialect),
+    ) && requested != recorded
+    {
+        return Err(anyhow::anyhow!(
+            "RLM dialect conflict: session records `{}`, requested `{}`",
+            recorded.language_id(),
+            requested.language_id()
+        ));
+    }
+    let ambient_rlm_dialect = RlmDialect::from_env().map_err(anyhow::Error::msg)?;
+    let configured_rlm_dialect = config_declares_rlm_dialect
+        .then_some(lash_config.rlm_dialect)
+        .or(ambient_rlm_dialect)
+        .unwrap_or_default();
+    let rlm_dialect = execution_mode.is_rlm().then_some(
+        args.rlm_dialect
+            .or_else(|| {
+                persisted_host_config
+                    .as_ref()
+                    .and_then(|config| config.rlm_dialect)
+            })
+            .unwrap_or(configured_rlm_dialect),
+    );
     let rlm_projected_bindings =
         resolve_rlm_projected_bindings(&args).map_err(anyhow::Error::msg)?;
     if rlm_projected_bindings.is_some() && !execution_mode.is_rlm() {
@@ -427,11 +445,8 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     let rlm_termination =
         resolve_rlm_termination(&args, execution_mode, persisted_host_config.as_ref())
             .map_err(anyhow::Error::msg)?;
-    let resolved_host_config = session::CliSessionHostConfig::new(
-        execution_mode,
-        configured_standard_context_approach.clone(),
-        rlm_termination,
-    );
+    let resolved_host_config =
+        session::CliSessionHostConfig::new(execution_mode, rlm_dialect, rlm_termination);
 
     // ── Stage 5: plugin stack + prompt layer + session policy ──
     let instruction_source: Arc<dyn InstructionSource> =
@@ -440,14 +455,13 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
             ..Default::default()
         }));
     let prompt_layer = plugins::cli_prompt_config(autonomous, &execution_mode);
-    let session_policy = SessionPolicy {
-        model: startup_model.model_spec.clone(),
-        provider_id: active_provider.kind().to_string(),
-        session_id: run_session_id.clone(),
-        autonomous,
-        prompt: prompt_layer.clone(),
-        ..Default::default()
-    };
+    let mut session_policy = SessionPolicy::new(crate::host_policy::turn_budget());
+    session_policy.model = startup_model.model_spec.clone();
+    session_policy.provider_id = active_provider.kind().to_string();
+    session_policy.session_id = run_session_id.clone();
+    session_policy.autonomous = autonomous;
+    session_policy.no_progress_budget = crate::host_policy::no_progress_budget();
+    session_policy.prompt = prompt_layer.clone();
     let tavily_key = lash_config.tavily_api_key().unwrap_or_default().to_string();
     let prompt_bridge = CliPromptBridge::default();
 
@@ -455,7 +469,6 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         plugins::plugin_factories_for_surface(plugins::PluginFactorySurfaceInput {
             autonomous,
             execution_mode,
-            standard_context_approach: configured_standard_context_approach.clone(),
             tavily_key,
             instruction_source: Arc::clone(&instruction_source),
             agent_model_specs: &startup_model.agent_model_specs,
@@ -474,18 +487,18 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     // demand. Built from the MCP pool's currently enumerated tools.
     let mcp_cataloged_tools = {
         let provider = McpToolProvider::new(Arc::clone(mcp_factory.pool()));
-        crate::examples::mcp_discovery::mcp_cataloged_tools("mcp", &provider)
+        crate::mcp_discovery::mcp_cataloged_tools("mcp", &provider)
     };
     let has_deferred_mcp_catalog = execution_mode.is_rlm() && !mcp_cataloged_tools.is_empty();
     let mcp_catalog_records = if has_deferred_mcp_catalog {
-        crate::examples::mcp_discovery::mcp_catalog_records(&mcp_cataloged_tools)
+        crate::mcp_discovery::mcp_catalog_records(&mcp_cataloged_tools)
     } else {
         Default::default()
     };
     let mcp_deferred_resolver: Option<lash::tools::SharedDeferredToolResolver> =
         if has_deferred_mcp_catalog {
             Some(Arc::new(
-                crate::examples::mcp_discovery::McpDeferredToolResolver::new(mcp_cataloged_tools),
+                crate::mcp_discovery::McpDeferredToolResolver::new(mcp_cataloged_tools),
             ))
         } else {
             None
@@ -496,9 +509,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     if execution_mode.is_rlm() {
         if has_deferred_mcp_catalog {
             plugin_stack.push(Arc::new(
-                crate::examples::mcp_discovery::ToolDiscoveryPluginFactory::with_catalog(
-                    mcp_catalog_records,
-                ),
+                crate::mcp_discovery::ToolDiscoveryPluginFactory::with_catalog(mcp_catalog_records),
             ));
             plugin_stack.push(Arc::new(StaticPluginFactory::new(
                 "mcp",
@@ -514,6 +525,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         let cwd = std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| ".".to_string());
+        println!("preflight: {}", store_preflight.outcome.name());
         println!(
             "{}",
             info_text(
@@ -521,7 +533,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
                 &startup_model.model,
                 session_policy.model.variant.effort(),
                 &execution_mode,
-                configured_standard_context_approach.as_ref(),
+                rlm_dialect,
                 Some(startup_model.resolved_spec.context_window()),
                 None,
                 &cwd,
@@ -562,17 +574,23 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     // background so it never delays an interactive session.
     {
         let attachments_dir = crate::paths::attachments_dir();
-        let sessions_dir = crate::session_log::sessions_dir();
+        let store_dir = crate::paths::store_dir();
         tokio::spawn(async move {
             // One hour: far larger than any live turn, so an in-flight put whose
             // intent has not yet been observed is never swept.
             const ATTACHMENT_GC_GRACE_MS: u64 = 60 * 60 * 1000;
             let backend = FileAttachmentStore::new(attachments_dir);
-            let root_set = lash_sqlite_store::SqliteSessionStoreFactory::new(sessions_dir);
+            let root_set = lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
+                store_dir,
+                crate::paths::processes_db(),
+            );
             match lash::persistence::reclaim_unreferenced_attachments(
                 &root_set,
                 &backend,
-                ATTACHMENT_GC_GRACE_MS,
+                lash::persistence::AttachmentReclamationPolicy {
+                    grace_period_ms: ATTACHMENT_GC_GRACE_MS,
+                    empty_root_set: lash::persistence::EmptyRootSetPolicy::Refuse,
+                },
             )
             .await
             {
@@ -603,7 +621,6 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         hash12(&serde_json::to_vec(&active_tool_definitions).unwrap_or_else(|_| b"[]".to_vec()));
     let initial_policy = session.policy_snapshot();
     let initial_model_variant = initial_policy.model.variant.clone();
-    let store = opened_session.bootstrap.store();
     let session_name = opened_session.bootstrap.session_name();
     let mut logger = opened_session.logger;
     session
@@ -624,7 +641,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
             crate::CliMode::Json => AutonomousMode::Json,
             crate::CliMode::Rpc => AutonomousMode::Rpc,
         };
-        return run_autonomous(
+        let result = run_autonomous(
             session,
             prompt,
             SkillCatalog::from_dirs(&crate::paths::default_skill_dirs()),
@@ -634,11 +651,15 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
             },
             rlm_projected_bindings,
             mode,
+            runtime_factory.active_effect_host(),
         )
         .await;
+        let shutdown = runtime_factory.shutdown().await;
+        result?;
+        return shutdown;
     }
     if args.mode == crate::CliMode::Rpc {
-        return run_autonomous(
+        let result = run_autonomous(
             session,
             String::new(),
             SkillCatalog::from_dirs(&crate::paths::default_skill_dirs()),
@@ -648,8 +669,12 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
             },
             None,
             AutonomousMode::Rpc,
+            runtime_factory.active_effect_host(),
         )
         .await;
+        let shutdown = runtime_factory.shutdown().await;
+        result?;
+        return shutdown;
     }
 
     // ── Stage 7b: interactive TUI ──
@@ -674,7 +699,8 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     crate::util::require_interactive_terminal("the lash TUI")?;
     let terminal = Terminal::enter()?;
 
-    run_app(
+    let shutdown_factory = runtime_factory.clone();
+    let result = run_app(
         terminal,
         session,
         runtime_factory,
@@ -687,13 +713,16 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         startup_model.resolved_spec.context_window(),
         session_name,
         model_catalog,
-        Arc::clone(&store),
         toolset_hash,
         crate::model_selection::variant_from_reasoning_selection(initial_model_variant),
         execution_mode,
+        rlm_dialect,
         startup_system_message,
     )
-    .await
+    .await;
+    let shutdown = shutdown_factory.shutdown().await;
+    result?;
+    shutdown
 }
 
 fn should_restore_terminal_for_panic(terminal_owner_thread: std::thread::ThreadId) -> bool {

@@ -171,6 +171,15 @@ fn build_status_slots(app: &App) -> (Vec<StatusSlot>, Vec<StatusSlot>) {
             priority: 80,
         });
     }
+    if let Some(dialect) = app.rlm_dialect_label.as_deref() {
+        left.push(StatusSlot {
+            spans: vec![
+                Span::styled(" · ", sep_style),
+                Span::styled(dialect.to_string(), theme::text_subtle_style()),
+            ],
+            priority: 79,
+        });
+    }
     for label in app.plugin_mode_indicators.values() {
         left.push(StatusSlot {
             spans: vec![

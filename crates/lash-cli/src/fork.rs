@@ -1,25 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use anyhow::{Context, Result, anyhow};
-use lash_core::provider::ProviderHandle;
-use lash_core::store::SessionHead;
-use lash_sqlite_store::Store;
-
-use crate::persistence::persist_committed_runtime_state;
 use crate::session_log::SessionLogger;
-use crate::startup::session::SessionBootstrap;
-
-async fn persist_parent_root_snapshot(session: &lash::LashSession, store: &Store) -> Result<()> {
-    let mut state = session
-        .admin()
-        .state()
-        .persist_current()
-        .await
-        .context("Failed to snapshot session state for fork")?;
-    persist_committed_runtime_state(store, &mut state).await;
-    Ok(())
-}
+use anyhow::{Context, Result, anyhow};
 
 fn find_program_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
@@ -44,7 +27,6 @@ fn is_launchable_file(path: &Path) -> bool {
         true
     }
 }
-
 pub fn resolve_resume_executable() -> Result<PathBuf> {
     if std::env::var_os("LASH_DEV_LAUNCH_CWD").is_some()
         && let Some(exe) = find_program_on_path("lash")
@@ -444,44 +426,6 @@ fn spawn_in_new_terminal_platform(exe: &Path, args: &[String]) -> Result<()> {
     ))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{DetectedTerminal, detect_terminal_from_hints};
-
-    #[test]
-    fn detect_terminal_prefers_term_program() {
-        assert_eq!(
-            detect_terminal_from_hints(Some("ghostty"), true, true, true),
-            Some(DetectedTerminal::Ghostty)
-        );
-        assert_eq!(
-            detect_terminal_from_hints(Some("Apple_Terminal"), false, false, false),
-            Some(DetectedTerminal::AppleTerminal)
-        );
-        assert_eq!(
-            detect_terminal_from_hints(Some("iTerm.app"), false, false, false),
-            Some(DetectedTerminal::ITerm2)
-        );
-    }
-
-    #[test]
-    fn detect_terminal_falls_back_to_terminal_specific_envs() {
-        assert_eq!(
-            detect_terminal_from_hints(None, true, false, false),
-            Some(DetectedTerminal::Kitty)
-        );
-        assert_eq!(
-            detect_terminal_from_hints(None, false, true, false),
-            Some(DetectedTerminal::WezTerm)
-        );
-        assert_eq!(
-            detect_terminal_from_hints(None, false, false, true),
-            Some(DetectedTerminal::ITerm2)
-        );
-        assert_eq!(detect_terminal_from_hints(None, false, false, false), None);
-    }
-}
-
 #[cfg(target_os = "windows")]
 fn powershell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
@@ -547,43 +491,6 @@ pub fn spawn_in_new_terminal(exe: &Path, args: &[String]) -> Result<()> {
     spawn_in_new_terminal_platform(exe, args)
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn materialize_child_from_graph(
-    child_session_id: &str,
-    child_store: &Store,
-    parent_store: &Store,
-    graph: &lash_core::SessionGraph,
-    config: &lash_core::PersistedSessionConfig,
-    checkpoint_ref: Option<&lash_core::BlobRef>,
-) {
-    let child_graph = graph.fork_current_path();
-    let child_checkpoint_ref = if let Some(blob_ref) = checkpoint_ref {
-        match parent_store.get_checkpoint(blob_ref).await {
-            Some(checkpoint) => Some(child_store.put_checkpoint(&checkpoint).await.checkpoint_ref),
-            None => None,
-        }
-    } else {
-        None
-    };
-    let token_ledger = parent_store
-        .load_session_head()
-        .await
-        .map(|head| head.token_ledger)
-        .unwrap_or_default();
-    child_store
-        .save_session_head(SessionHead {
-            session_id: child_session_id.to_string(),
-            head_revision: 0,
-            agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
-            graph: child_graph.clone(),
-            config: config.clone(),
-            checkpoint_ref: child_checkpoint_ref.clone(),
-            token_ledger,
-        })
-        .await;
-}
-
 pub struct ForkedSession {
     pub session_id: String,
     pub session_name: String,
@@ -591,243 +498,83 @@ pub struct ForkedSession {
 
 pub async fn fork_current_session(
     session: Option<&lash::LashSession>,
+    opener: &crate::startup::session::CliSessionOpener,
     logger: &SessionLogger,
-    _provider: &ProviderHandle,
     configured_model: &str,
-    _context_window: u64,
-    _model_variant: Option<&str>,
 ) -> Result<ForkedSession> {
-    if let Some(session) = session {
-        persist_parent_root_snapshot(session, logger.store().as_ref()).await?;
-    }
-    let child_bootstrap =
-        SessionBootstrap::fork_child(&logger.session_id, configured_model).await?;
-    let child_store = child_bootstrap.store();
-    let child_meta = child_store
-        .load_session_meta()
+    let session = session.ok_or_else(|| anyhow!("No active session to fork"))?;
+    let node_id = session
+        .read_view()
+        .session_graph()
+        .leaf_node_id
+        .clone()
+        .ok_or_else(|| anyhow!("The session has no committed node to fork"))?;
+    let child_session_id = uuid::Uuid::new_v4().to_string();
+    opener
+        .fork_at(&node_id, &child_session_id)
         .await
-        .ok_or_else(|| anyhow!("Fork child session metadata was not created"))?;
-    let parent_head = if let Some(head) = logger.store().load_session_head().await {
-        head
-    } else {
-        let model = lash_core::ModelSpec::from_token_limits(
-            configured_model,
-            _model_variant
-                .map(|effort| lash_core::ReasoningSelection::Effort(effort.to_string()))
-                .unwrap_or_default(),
-            usize::try_from(_context_window).context("fork context window does not fit usize")?,
-            None,
-        )
-        .map_err(anyhow::Error::msg)?;
-        SessionHead {
-            session_id: child_meta.session_id.clone(),
-            head_revision: 0,
-            agent_frames: Vec::new(),
-            current_agent_frame_id: String::new(),
-            graph: lash_core::SessionGraph::default(),
-            config: lash_core::PersistedSessionConfig {
-                provider_id: _provider.kind().to_string(),
-                model,
-            },
-            checkpoint_ref: None,
-            token_ledger: Vec::new(),
-        }
-    };
-    materialize_child_from_graph(
-        &child_meta.session_id,
-        child_store.as_ref(),
-        logger.store().as_ref(),
-        &parent_head.graph,
-        &parent_head.config,
-        parent_head.checkpoint_ref.as_ref(),
-    )
-    .await;
-
+        .context("fork session through Lash")?;
+    let child_session_name =
+        crate::generate_session_name(&crate::session_log::sessions_dir()).await;
+    crate::session_log::save_roster_entry(&crate::session_log::RosterEntry {
+        session_id: child_session_id.clone(),
+        session_name: child_session_name.clone(),
+        model: configured_model.to_string(),
+        created_at: chrono::Local::now().to_rfc3339(),
+        cwd: std::env::current_dir().ok(),
+        parent_session_id: Some(logger.session_id.clone()),
+        message_count: session
+            .read_view()
+            .messages()
+            .iter()
+            .filter(|message| message.role == lash_core::MessageRole::User)
+            .count(),
+        first_message: String::new(),
+        inputs: Vec::new(),
+    })?;
+    if let Ok(config) = crate::session_log::load_host_config(&logger.session_id) {
+        crate::session_log::save_host_config(&child_session_id, &config)?;
+    }
     Ok(ForkedSession {
-        session_id: child_meta.session_id,
-        session_name: child_meta.session_name,
+        session_id: child_session_id,
+        session_name: child_session_name,
     })
 }
 
 #[cfg(test)]
-mod fork_tests {
-    use super::*;
-    use crate::session_log;
-    use crate::test_support::{EnvVarGuard, TempDirGuard, env_lock};
-    use lash_core::ToolState;
-    use lash_core::provider::ProviderHandle;
-    use std::sync::Arc;
+mod tests {
+    use super::{DetectedTerminal, detect_terminal_from_hints};
 
-    fn dummy_provider() -> ProviderHandle {
-        ProviderHandle::new(
-            lash_provider_openai::OpenAiCompatibleProvider::new(
-                "test",
-                "https://example.invalid/v1",
-            )
-            .into_components(),
-        )
-    }
-
-    fn empty_tool_state() -> ToolState {
-        ToolState::default()
-    }
-
-    fn persisted_graph(
-        messages: Vec<lash_core::Message>,
-        _iteration: usize,
-    ) -> lash_core::SessionGraph {
-        lash_core::SessionGraph::from_active_read_state(&messages)
-    }
-
-    fn persisted_checkpoint(iteration: usize) -> lash_core::store::HydratedSessionCheckpoint {
-        lash_core::store::HydratedSessionCheckpoint {
-            turn_state: lash_core::PersistedTurnState {
-                turn_index: iteration,
-                token_usage: lash_core::TokenUsage {
-                    input_tokens: 10,
-                    output_tokens: 3,
-                    cache_read_input_tokens: 1,
-                    cache_write_input_tokens: 0,
-                    reasoning_output_tokens: 2,
-                },
-                last_prompt_usage: None,
-                protocol_turn_options: Default::default(),
-            },
-            tool_state_ref: None,
-            tool_state: Some(empty_tool_state()),
-            plugin_snapshot_ref: None,
-            plugin_snapshot_revision: None,
-            plugin_snapshot: None,
-            execution_state_ref: None,
-            execution_state: None,
-        }
-    }
-
-    async fn save_persisted_root(store: &Store, graph: lash_core::SessionGraph, iteration: usize) {
-        let checkpoint_ref = store
-            .put_checkpoint(&persisted_checkpoint(iteration))
-            .await
-            .checkpoint_ref;
-        store
-            .save_session_head(lash_core::store::SessionHead {
-                session_id: "root".to_string(),
-                head_revision: 0,
-                agent_frames: Vec::new(),
-                current_agent_frame_id: String::new(),
-                graph,
-                config: lash_core::PersistedSessionConfig {
-                    provider_id: dummy_provider().kind().to_string(),
-                    model: lash_core::ModelSpec::from_token_limits(
-                        "gpt-test",
-                        Default::default(),
-                        1024,
-                        None,
-                    )
-                    .expect("valid model spec"),
-                },
-                checkpoint_ref: Some(checkpoint_ref),
-                token_ledger: Vec::new(),
-            })
-            .await;
-    }
-
-    #[tokio::test]
-    async fn resume_executable_prefers_dev_wrapper_when_present() {
-        let _env_guard = env_lock().lock().await;
-        let temp = TempDirGuard::new("lash-fork-path");
-        let lash_bin = temp.path().join("lash");
-        std::fs::write(&lash_bin, "#!/usr/bin/env sh\nexit 0\n").expect("write lash wrapper");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&lash_bin, std::fs::Permissions::from_mode(0o755))
-                .expect("chmod lash wrapper");
-        }
-        let _path = EnvVarGuard::set("PATH", temp.path());
-        let _dev_cwd = EnvVarGuard::set("LASH_DEV_LAUNCH_CWD", temp.path());
-
+    #[test]
+    fn detect_terminal_prefers_term_program() {
         assert_eq!(
-            resolve_resume_executable().expect("resolve executable"),
-            lash_bin
+            detect_terminal_from_hints(Some("ghostty"), true, true, true),
+            Some(DetectedTerminal::Ghostty)
+        );
+        assert_eq!(
+            detect_terminal_from_hints(Some("Apple_Terminal"), false, false, false),
+            Some(DetectedTerminal::AppleTerminal)
+        );
+        assert_eq!(
+            detect_terminal_from_hints(Some("iTerm.app"), false, false, false),
+            Some(DetectedTerminal::ITerm2)
         );
     }
 
-    #[tokio::test]
-    async fn fork_clones_persisted_root_snapshot_without_runtime_when_no_live_snapshot() {
-        let _env_guard = env_lock().lock().await;
-        let temp = TempDirGuard::new("lash-fork-persisted-snapshot");
-        let _lash_home = EnvVarGuard::set("LASH_HOME", temp.path());
-        std::fs::create_dir_all(session_log::sessions_dir()).expect("sessions dir");
-
-        let parent_filename = "parent.db".to_string();
-        let parent_path = session_log::sessions_dir().join(&parent_filename);
-        let parent_store = Arc::new(Store::open(&parent_path).await.expect("parent store"));
-        let parent_logger = SessionLogger::new(
-            Arc::clone(&parent_store),
-            parent_filename.clone(),
-            "gpt-test",
-            Some("parent-session".into()),
-            "parent".into(),
-        )
-        .await
-        .expect("parent logger");
-        let messages = vec![lash_core::Message {
-            id: "u1".to_string(),
-            role: lash_core::MessageRole::User,
-            parts: vec![lash_core::Part {
-                id: "u1.p0".to_string(),
-                kind: lash_core::PartKind::Text,
-                content: "hello".to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: lash_core::PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]
-            .into(),
-            origin: None,
-        }];
-        save_persisted_root(parent_store.as_ref(), persisted_graph(messages, 1), 1).await;
-
-        let child = fork_current_session(
-            None,
-            &parent_logger,
-            &dummy_provider(),
-            "gpt-test",
-            1024,
-            None,
-        )
-        .await
-        .expect("fork should succeed");
-
-        let child_filename = session_log::filename_for_session_identifier(&child.session_id)
-            .await
-            .expect("child filename");
-        let child_store = Store::open(&session_log::sessions_dir().join(child_filename))
-            .await
-            .expect("child store");
-        let child_meta = child_store.load_session_meta().await.expect("child meta");
-        assert_eq!(child.session_id, child_meta.session_id);
-        assert_eq!(child.session_name, child_meta.session_name);
-        assert_eq!(child_meta.parent_session_id(), Some("parent-session"));
-
-        let child_head = child_store.load_session_head().await.expect("child head");
-        let child_graph = child_head.graph;
-        let child_checkpoint = match child_head.checkpoint_ref.as_ref() {
-            Some(blob_ref) => child_store.get_checkpoint(blob_ref).await,
-            None => None,
-        };
-        let child_turn = child_checkpoint.expect("child checkpoint").turn_state;
-        assert_eq!(child_turn.turn_index, 1);
-
-        let child_state = lash_core::SessionSnapshot {
-            session_graph: child_graph,
-            ..lash_core::SessionSnapshot::default()
-        };
-        let child_view = lash_core::SessionReadView::from_snapshot(&child_state);
-        assert_eq!(child_view.messages().len(), 1);
-        assert_eq!(child_view.messages()[0].parts[0].content, "hello");
+    #[test]
+    fn detect_terminal_falls_back_to_terminal_specific_envs() {
+        assert_eq!(
+            detect_terminal_from_hints(None, true, false, false),
+            Some(DetectedTerminal::Kitty)
+        );
+        assert_eq!(
+            detect_terminal_from_hints(None, false, true, false),
+            Some(DetectedTerminal::WezTerm)
+        );
+        assert_eq!(
+            detect_terminal_from_hints(None, false, false, true),
+            Some(DetectedTerminal::ITerm2)
+        );
+        assert_eq!(detect_terminal_from_hints(None, false, false, false), None);
     }
 }

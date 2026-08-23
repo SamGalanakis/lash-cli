@@ -18,6 +18,7 @@ pub(crate) fn run_html_export_once(workload: UiPerfWorkload) -> UiPerfRunResult 
     let prompts = export_prompt_snapshots(workload.turn_count);
     let session = LoadedSession {
         meta: None,
+        model_id: Some("gpt-5.4".to_string()),
         chronological,
         trace_path: PathBuf::from("ui-perf.trace.jsonl"),
         context_window_tokens: Some(200_000),

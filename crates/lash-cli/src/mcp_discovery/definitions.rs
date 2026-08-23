@@ -1,5 +1,6 @@
-use lash_core::{ToolActivation, ToolDefinition, ToolScheduling};
-use lash_tool_support::{LashlangToolBinding, ToolDefinitionLashlangExt};
+//! Deferred MCP tool definitions.
+use lash_core::{ToolActivation, ToolDefinition};
+use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::{Value, json};
 
 pub(crate) fn search_tools_definition() -> ToolDefinition {
@@ -37,11 +38,7 @@ pub(crate) fn search_tools_definition() -> ToolDefinition {
         Many(Vec<String>),
     }
 
-    let description = if cfg!(feature = "lashlang") {
-        "Search catalogued module capabilities, aliases, descriptions, signatures, return fields, and examples. Use this when the capability you need is only listed in the catalogued-capabilities preview or is too sparse to call confidently. Query with concise keywords and short intent phrases: include the app/domain, action, object, qualifiers, and important fields or constraints. For initial exploration, print only result call paths and signatures; inspect descriptions and examples only when you need to choose between close matches or learn call idioms."
-    } else {
-        "Search catalogued tools by name, id, description, signatures, return fields, and examples. Use this when the capability you need is only listed in the catalogued-capabilities preview or is too sparse to call confidently. Query with concise keywords and short intent phrases: include the app/domain, action, object, qualifiers, and important fields or constraints."
-    };
+    let description = "Search catalogued capabilities, aliases, descriptions, signatures, return fields, and examples. Use this when the capability you need is only listed in the catalogued-capabilities preview or is too sparse to call confidently. Query with concise keywords and short intent phrases: include the app/domain, action, object, qualifiers, and important fields or constraints.";
 
     ToolDefinition::raw(
         "tool:search_tools",
@@ -50,18 +47,8 @@ pub(crate) fn search_tools_definition() -> ToolDefinition {
         schema_for::<SearchToolsArgs>(),
         search_tools_output_schema(),
     )
-    .with_examples(vec![
-        "await tools.search({ query: \"spotify liked songs library\" })?".into(),
-        "await tools.search({ query: \"spotify song details play_count genre title song_id\" })?"
-            .into(),
-        "await tools.search({ query: \"venmo send money private payment_card receiver_email\" })?"
-            .into(),
-    ])
     .with_activation(ToolActivation::Always)
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["tools"], "search").with_aliases(["tool_search"]),
-    )
-    .with_scheduling(ToolScheduling::Serial)
+    .with_tool_binding(ToolBinding::new(["tools"], "search").with_aliases(["tool_search"]))
 }
 
 fn schema_for<T>() -> Value
@@ -120,7 +107,7 @@ fn search_tools_output_schema() -> Value {
             "call".to_string(),
             json!({
                 "type": "string",
-                "description": "Exact legal Lashlang module call path."
+                "description": "Exact callable module path for the active RLM dialect."
             }),
         );
         schema
@@ -161,7 +148,7 @@ mod tests {
         );
         #[cfg(feature = "lashlang")]
         assert!(
-            rendered_signature.contains("module?: str | list[str] | null"),
+            rendered_signature.contains("module?: list[str] | str | null"),
             "{rendered_signature}"
         );
         #[cfg(not(feature = "lashlang"))]
@@ -170,7 +157,7 @@ mod tests {
             "{rendered_signature}"
         );
         assert!(
-            rendered_signature.contains("exclude?: str | list[str] | null"),
+            rendered_signature.contains("exclude?: list[str] | str | null"),
             "{rendered_signature}"
         );
         assert!(

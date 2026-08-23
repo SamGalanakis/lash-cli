@@ -1,12 +1,12 @@
 use std::io::{self, BufRead, Write};
 
 use futures_util::StreamExt as _;
+use lash::TurnOutcome;
 use lash::{
     LashSession, TurnActivity, TurnEvent, TurnInput,
     observe::{SessionObservationEventPayload, SessionObservationStreamItem},
     usage::{SessionUsageReport, TokenLedgerEntry, diff_usage_reports},
 };
-use lash_core::TurnOutcome;
 
 use crate::SkillCatalog;
 use crate::app::PreparedTurn;
@@ -20,22 +20,25 @@ use crate::util;
 pub const AUTONOMOUS_JSON_VERSION: u32 = 1;
 
 /// Human-facing status token for a completed tool call in Print mode.
-fn tool_status_label(status: lash_core::ToolCallStatus) -> &'static str {
+#[derive(Clone, Copy)]
+enum ToolStatus {
+    Success,
+    Failure,
+    Cancelled,
+}
+
+fn tool_status_label(status: ToolStatus) -> &'static str {
     match status {
-        lash_core::ToolCallStatus::Success => "ok",
-        lash_core::ToolCallStatus::Failure => "error",
-        lash_core::ToolCallStatus::Cancelled => "cancelled",
+        ToolStatus::Success => "ok",
+        ToolStatus::Failure => "error",
+        ToolStatus::Cancelled => "cancelled",
     }
 }
 
 /// Render the Print-mode `[tool]` summary line for a completed tool call.
 /// Sub-second durations are elided to keep the stream quiet (see
 /// [`util::format_duration_ms_if_visible`]).
-pub(crate) fn format_tool_line(
-    name: &str,
-    status: lash_core::ToolCallStatus,
-    duration_ms: u64,
-) -> String {
+fn format_tool_line(name: &str, status: ToolStatus, duration_ms: u64) -> String {
     let status = tool_status_label(status);
     match util::format_duration_ms_if_visible(duration_ms) {
         Some(duration_text) => format!("[tool] {name} · {status} · {duration_text}"),
@@ -87,7 +90,12 @@ impl AutonomousRenderer {
                 duration_ms,
                 ..
             } => {
-                eprintln!("{}", format_tool_line(&name, output.status(), duration_ms));
+                let status = match output.outcome {
+                    lash_core::ToolCallOutcome::Success(_) => ToolStatus::Success,
+                    lash_core::ToolCallOutcome::Failure(_) => ToolStatus::Failure,
+                    lash_core::ToolCallOutcome::Cancelled(_) => ToolStatus::Cancelled,
+                };
+                eprintln!("{}", format_tool_line(&name, status, duration_ms));
             }
             TurnEvent::ModelRequestStarted { protocol_iteration } => {
                 eprintln!("[thinking] step {}", protocol_iteration + 1);
@@ -121,7 +129,9 @@ impl AutonomousRenderer {
             | TurnEvent::CodeBlockStarted { .. }
             | TurnEvent::CodeBlockCompleted { .. }
             | TurnEvent::FinalValue { .. }
-            | TurnEvent::ToolValue { .. } => {}
+            | TurnEvent::ToolValue { .. }
+            | TurnEvent::ModelCallRecorded { .. }
+            | TurnEvent::ToolIntentOutcome { .. } => {}
         }
         Ok(())
     }
@@ -194,7 +204,7 @@ fn json_event_record(
 fn json_finish_record(
     stream_id: u64,
     request_id: Option<&serde_json::Value>,
-    turn: &lash::TurnResult,
+    turn: &lash::TurnReport,
     cancelled: bool,
 ) -> serde_json::Value {
     let ok = matches!(
@@ -257,7 +267,7 @@ impl JsonRenderer {
         self.write_record(record)
     }
 
-    fn finish(&mut self, turn: &lash::TurnResult, cancelled: bool) -> anyhow::Result<()> {
+    fn finish(&mut self, turn: &lash::TurnReport, cancelled: bool) -> anyhow::Result<()> {
         let record = json_finish_record(self.stream_id, self.request_id.as_ref(), turn, cancelled);
         self.write_record(record)
     }
@@ -286,7 +296,7 @@ impl AutonomousOutput {
         }
     }
 
-    fn finish_success(&mut self, turn: &lash::TurnResult, cancelled: bool) -> anyhow::Result<()> {
+    fn finish_success(&mut self, turn: &lash::TurnReport, cancelled: bool) -> anyhow::Result<()> {
         match self {
             AutonomousOutput::Print(renderer) => {
                 if !turn.assistant_output.safe_text.is_empty() {
@@ -304,7 +314,7 @@ impl AutonomousOutput {
                         }
                         eprintln!("error: model returned malformed assistant output: {preview}");
                     }
-                    std::process::exit(2);
+                    return Err(anyhow::anyhow!("model returned no usable assistant output"));
                 }
                 Ok(())
             }
@@ -312,7 +322,7 @@ impl AutonomousOutput {
         }
     }
 
-    fn finish_failure(&mut self, turn: &lash::TurnResult, cancelled: bool) -> anyhow::Result<()> {
+    fn finish_failure(&mut self, turn: &lash::TurnReport, cancelled: bool) -> anyhow::Result<()> {
         match self {
             AutonomousOutput::Print(_) => {
                 for issue in &turn.errors {
@@ -338,11 +348,12 @@ async fn run_autonomous_turn(
     turn_input: TurnInput,
     output: &mut AutonomousOutput,
     stream_id: u64,
+    effect_host: std::sync::Arc<dyn lash::durability::EffectHost>,
 ) -> anyhow::Result<AutonomousTurnOutcome> {
     let observable = session.observe();
     let cursor = observable.current_observation().cursor;
     let mut observation = Some(observable.subscribe_and_recover(cursor));
-    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id);
+    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id, effect_host);
     #[cfg(unix)]
     {
         let cancel = cancel.clone();
@@ -367,14 +378,11 @@ async fn run_autonomous_turn(
                 observation.as_mut()?.next().await
             }, if !observation_finished => {
                 match next {
-                    Some(Ok(SessionObservationStreamItem::Event(event))) => match event.payload {
+                    Some(Ok(SessionObservationStreamItem::Event(event))) => match event.payload.clone() {
                         SessionObservationEventPayload::TurnActivity(activity) => {
                             match output.handle(activity) {
                                 Ok(()) => {}
-                                Err(err) => {
-                                    eprintln!("error: {err}");
-                                    std::process::exit(2);
-                                }
+                                Err(err) => return Err(err),
                             }
                         }
                         SessionObservationEventPayload::Committed { .. } => {
@@ -382,7 +390,8 @@ async fn run_autonomous_turn(
                         }
                         SessionObservationEventPayload::QueueChanged { .. }
                         | SessionObservationEventPayload::ProcessChanged { .. }
-                        | SessionObservationEventPayload::AgentFrameSwitched { .. } => {}
+                        | SessionObservationEventPayload::AgentFrameSwitched { .. }
+                        | SessionObservationEventPayload::ResidentChanged { .. } => {}
                     },
                     Some(Ok(SessionObservationStreamItem::Gap { gap, .. })) => {
                         eprintln!(
@@ -431,13 +440,14 @@ async fn run_prepared_autonomous_turn(
     rlm_projected_bindings: Option<lash_protocol_rlm::RlmProjectedBindings>,
     stream_id: u64,
     output: &mut AutonomousOutput,
+    effect_host: std::sync::Arc<dyn lash::durability::EffectHost>,
 ) -> anyhow::Result<AutonomousTurnOutcome> {
     let prepared = PreparedTurn::prepare(prompt, Vec::new(), skills);
     let mut turn_input = make_turn_input(&prepared);
     if let Some(bindings) = rlm_projected_bindings {
         turn_input = lash_protocol_rlm::RlmTurnInputExt::rlm_project(turn_input, bindings)?;
     }
-    run_autonomous_turn(session, turn_input, output, stream_id).await
+    run_autonomous_turn(session, turn_input, output, stream_id, effect_host).await
 }
 
 async fn finish_autonomous_outcome(
@@ -456,13 +466,13 @@ async fn finish_autonomous_outcome(
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. } => {
             output.finish_success(&done.result, cancel.is_cancelled())?;
             if cancel.is_cancelled() && matches!(output, AutonomousOutput::Print(_)) {
-                std::process::exit(1);
+                return Err(anyhow::anyhow!("autonomous turn was cancelled"));
             }
         }
         TurnOutcome::Stopped(_) => {
             output.finish_failure(&done.result, cancel.is_cancelled())?;
             if matches!(output, AutonomousOutput::Print(_)) {
-                std::process::exit(1);
+                return Err(anyhow::anyhow!("autonomous turn stopped"));
             }
         }
     }
@@ -478,9 +488,10 @@ pub(crate) async fn run_autonomous(
     persistence: AutonomousPersistenceContext,
     rlm_projected_bindings: Option<lash_protocol_rlm::RlmProjectedBindings>,
     mode: AutonomousMode,
+    effect_host: std::sync::Arc<dyn lash::durability::EffectHost>,
 ) -> anyhow::Result<()> {
     if mode == AutonomousMode::Rpc {
-        return run_rpc(session, skills, persistence).await;
+        return run_rpc(session, skills, persistence, effect_host).await;
     }
     let before_usage = session.usage_report();
     let mut output = match mode {
@@ -495,6 +506,7 @@ pub(crate) async fn run_autonomous(
         rlm_projected_bindings,
         1,
         &mut output,
+        effect_host,
     )
     .await?;
     let (done, cancelled) =
@@ -576,6 +588,7 @@ async fn run_rpc(
     session: LashSession,
     skills: SkillCatalog,
     persistence: AutonomousPersistenceContext,
+    effect_host: std::sync::Arc<dyn lash::durability::EffectHost>,
 ) -> anyhow::Result<()> {
     rpc_write(serde_json::json!({
         "type": "ready",
@@ -647,6 +660,7 @@ async fn run_rpc(
                     None,
                     stream_id,
                     &mut output,
+                    std::sync::Arc::clone(&effect_host),
                 )
                 .await?;
                 let (done, cancelled) =
@@ -677,11 +691,10 @@ async fn run_rpc(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash::TurnResult;
+    use lash::turn::AssistantOutput;
+    use lash::{TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnReport, TurnStop};
     use lash_core::{
-        AssistantOutput, ExecutionSummary, OutputState, SessionSnapshot, TokenUsage,
-        ToolCallOutput, ToolCallRecord, ToolCallStatus, TurnActivityId, TurnFinish, TurnOutcome,
-        TurnStop,
+        SessionPolicy, SessionSnapshot, TokenUsage, ToolCallOutput, ToolCallRecord, TurnActivityId,
     };
     use serde_json::json;
 
@@ -701,18 +714,19 @@ mod tests {
         }
     }
 
-    fn sample_turn_result() -> TurnResult {
-        TurnResult {
-            state: SessionSnapshot::default(),
+    fn sample_turn_result() -> TurnReport {
+        let assistant_output: AssistantOutput = serde_json::from_value(json!({
+            "safe_text": "hello",
+            "raw_text": "hello",
+            "state": "usable"
+        }))
+        .expect("assistant output");
+        TurnReport {
+            state: SessionSnapshot::new(SessionPolicy::new(crate::host_policy::turn_budget())),
             outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
                 text: "hello".to_string(),
             }),
-            cancellation: None,
-            assistant_output: AssistantOutput {
-                safe_text: "hello".to_string(),
-                raw_text: "hello".to_string(),
-                state: OutputState::Usable,
-            },
+            assistant_output,
             usage: TokenUsage {
                 input_tokens: 3,
                 output_tokens: 4,
@@ -727,13 +741,14 @@ mod tests {
                 output: ToolCallOutput::success("ok"),
                 duration_ms: 5,
             }],
-            execution: ExecutionSummary {
+            execution: TurnExecutionMetrics {
                 had_tool_calls: true,
                 had_code_execution: false,
                 started_at_ms: 1_000,
                 duration_ms: 42,
             },
             errors: Vec::new(),
+            acceptance: None,
         }
     }
 
@@ -848,7 +863,7 @@ mod tests {
     #[test]
     fn tool_line_renders_status_and_visible_duration() {
         assert_eq!(
-            format_tool_line("read_file", ToolCallStatus::Success, 1_500),
+            format_tool_line("read_file", ToolStatus::Success, 1_500),
             "[tool] read_file · ok · 1.5s"
         );
     }
@@ -856,7 +871,7 @@ mod tests {
     #[test]
     fn tool_line_elides_subsecond_duration() {
         assert_eq!(
-            format_tool_line("read_file", ToolCallStatus::Success, 500),
+            format_tool_line("read_file", ToolStatus::Success, 500),
             "[tool] read_file · ok"
         );
     }
@@ -864,7 +879,7 @@ mod tests {
     #[test]
     fn tool_line_renders_failure_status() {
         assert_eq!(
-            format_tool_line("write_file", ToolCallStatus::Failure, 2_000),
+            format_tool_line("write_file", ToolStatus::Failure, 2_000),
             "[tool] write_file · error · 2.0s"
         );
     }
@@ -872,7 +887,7 @@ mod tests {
     #[test]
     fn tool_line_renders_cancelled_status() {
         assert_eq!(
-            format_tool_line("shell", ToolCallStatus::Cancelled, 0),
+            format_tool_line("shell", ToolStatus::Cancelled, 0),
             "[tool] shell · cancelled"
         );
     }

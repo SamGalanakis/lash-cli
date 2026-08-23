@@ -115,6 +115,7 @@ impl Row {
             }),
             cache_control: self.cache_control,
             stream_termination: None,
+            sampling: Default::default(),
         }
     }
 }

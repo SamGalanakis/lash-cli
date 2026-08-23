@@ -8,7 +8,7 @@ use crate::assistant_text::normalize_assistant_text;
 use crate::prompt_model::PromptRequest;
 use crate::theme;
 use async_trait::async_trait;
-use lash_core::{Part, PartKind};
+use lash_core::Part;
 use lash_tui_extensions::{
     SlashCommandSpec, TuiExtension, TuiExtensionContext, TuiExtensions, TuiHostEffect,
 };
@@ -47,10 +47,10 @@ fn timeline_items_from_test_read_view(
         .cloned()
         .collect::<Vec<_>>();
     graph.append_active_read_delta(&missing_messages);
-    let state = lash_core::SessionSnapshot {
-        session_graph: graph,
-        ..lash_core::SessionSnapshot::default()
-    };
+    let mut state = lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
+        crate::host_policy::turn_budget(),
+    ));
+    state.session_graph = graph;
     let read_view = lash_core::SessionReadView::from_snapshot(&state);
     timeline_from_read_view(&read_view, ui_state)
         .items()
@@ -356,18 +356,11 @@ fn interrupted_projection_hides_appended_skill_blocks_in_user_text() {
     let message = lash_core::Message {
         id: "m1".into(),
         role: lash_core::MessageRole::User,
-        parts: vec![Part {
-            id: "m1.p1".into(),
-            kind: PartKind::Text,
-            content: "Use /wholehog\n\n<skill>\n<name>wholehog</name>\nbody\n</skill>".into(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: lash_core::PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
+        parts: vec![Part::text(
+            "m1.p1".into(),
+            "Use /wholehog\n\n<skill>\n<name>wholehog</name>\nbody\n</skill>".into(),
+            None,
+        )]
         .into(),
         origin: None,
     };
@@ -1408,15 +1401,19 @@ fn live_reasoning_compacts_after_activity_appends_below_it() {
         "live reasoning should expand while it is the tail; got {live_text:?}",
     );
 
-    app.handle_session_event(lash_core::SessionStreamEvent::ToolCall {
-        call_id: None,
-        name: "read_file".into(),
-        args: serde_json::json!({ "path": "crates/lash/src/provider.rs" }),
-        output: lash_core::ToolCallOutput::success(
-            serde_json::json!({ "content": "provider code" }),
-        ),
-        duration_ms: 0,
-    });
+    app.handle_turn_activity(lash::TurnActivity::independent(
+        lash::TurnEvent::ToolCallCompleted {
+            call_id: None,
+            name: "read_file".into(),
+            args: serde_json::json!({ "path": "crates/lash/src/provider.rs" }),
+            output: lash_core::ToolCallOutput::success(
+                serde_json::json!({ "content": "provider code" }),
+            ),
+            duration_ms: 0,
+            graph_key: None,
+            parent_call_id: None,
+        },
+    ));
 
     let compact_text: Vec<String> = app
         .rendered_block_lines_cached(0, 80, 24)
@@ -1452,9 +1449,11 @@ fn committed_reasoning_compacts_while_live_assistant_streams() {
     )]
     .into();
 
-    app.handle_session_event(lash_core::SessionStreamEvent::TextDelta {
-        content: "Answer is streaming.".into(),
-    });
+    app.handle_turn_activity(lash::TurnActivity::independent(
+        lash::TurnEvent::AssistantProseDelta {
+            text: "Answer is streaming.".into(),
+        },
+    ));
 
     let compact_text: Vec<String> = app
         .rendered_block_lines_cached(0, 80, 24)

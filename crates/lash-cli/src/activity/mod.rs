@@ -359,10 +359,10 @@ impl ActivityState {
             // nothing and the children render from those real events.
             return Vec::new();
         }
-        let status = match output.status() {
-            lash_core::ToolCallStatus::Success => ActivityStatus::Completed,
-            lash_core::ToolCallStatus::Failure => ActivityStatus::Failed,
-            lash_core::ToolCallStatus::Cancelled => ActivityStatus::Cancelled,
+        let status = match &output.outcome {
+            lash_core::ToolCallOutcome::Success(_) => ActivityStatus::Completed,
+            lash_core::ToolCallOutcome::Failure(_) => ActivityStatus::Failed,
+            lash_core::ToolCallOutcome::Cancelled(_) => ActivityStatus::Cancelled,
         };
         let mut ctx = ProjectCtx {
             name,
@@ -427,9 +427,10 @@ impl ActivityState {
         let output = if success {
             lash_core::ToolCallOutput::success(result)
         } else {
-            lash_core::ToolResult::err(result)
-                .into_done_output()
-                .expect("static failure output")
+            lash_core::ToolCallOutput::failure(lash_core::ToolFailure::invalid_request(
+                "test_failure",
+                result.to_string(),
+            ))
         };
         self.project_tool_output(name, args, output, duration_ms)
     }

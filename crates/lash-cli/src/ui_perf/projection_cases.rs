@@ -1,9 +1,8 @@
 use std::time::Instant;
 
 use lash_core::{
-    Message, MessageRole, Part, PartKind, PruneState, SessionReadView, SessionSnapshot,
-    ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, ToolResult, TurnActivity,
-    TurnEvent,
+    Message, MessageRole, Part, PartKind, SessionReadView, SessionSnapshot, ToolCallOutput,
+    ToolCancellation, ToolFailure, ToolFailureClass, ToolOutcome, TurnActivity, TurnEvent,
 };
 use serde_json::json;
 
@@ -106,7 +105,7 @@ pub(crate) fn run_turn_interrupt_steer_reconciliation_once(
     app.finish_turn_from_read_view(&read_view);
     app.start_turn();
     app.handle_turn_activity(TurnActivity::independent(TurnEvent::AssistantProseDelta {
-        text: "I am midway through the current answer while a steer arrives.".to_string(),
+        text: "I am midway through the current answer while a steer arrives.".into(),
     }));
 
     let active = PreparedTurn::prepare_with_effective_text(
@@ -294,6 +293,8 @@ pub(crate) fn build_projection_read_view(turn_count: usize) -> SessionReadView {
                             .to_string(),
                         output: vec!["time".to_string()],
                         images: Vec::new(),
+                        calls: Vec::new(),
+                        calls_omitted: 0,
                         error: None,
                         final_output: (turn % 10 == 0).then(|| json!("RLM final output")),
                     },
@@ -304,7 +305,9 @@ pub(crate) fn build_projection_read_view(turn_count: usize) -> SessionReadView {
 
     let state = SessionSnapshot {
         session_graph: graph,
-        ..SessionSnapshot::default()
+        ..SessionSnapshot::new(lash_core::SessionPolicy::new(
+            crate::host_policy::turn_budget(),
+        ))
     };
     SessionReadView::from_snapshot(&state)
 }
@@ -315,10 +318,10 @@ fn live_activity_event(index: usize) -> TurnEvent {
             protocol_iteration: index / 14,
         },
         1 => TurnEvent::ReasoningDelta {
-            text: format!("reasoning chunk {index}\n"),
+            text: format!("reasoning chunk {index}\n").into(),
         },
         2 => TurnEvent::AssistantProseDelta {
-            text: format!("assistant prose chunk {index}\n"),
+            text: format!("assistant prose chunk {index}\n").into(),
         },
         3 => TurnEvent::ToolCallStarted {
             call_id: Some(format!("shell-{index}")),
@@ -430,7 +433,7 @@ fn live_activity_event(index: usize) -> TurnEvent {
             call_id: Some(format!("generic-{index}")),
             name: "search_tools".to_string(),
             args: json!({ "query": "projection tools" }),
-            output: ToolResult::err(json!("tool search failed"))
+            output: ToolOutcome::err(json!("tool search failed"))
                 .into_done_output()
                 .expect("static failure output"),
             duration_ms: 4,
@@ -463,17 +466,27 @@ fn assistant_message(id: &str, reasoning: &str, text: &str) -> Message {
 }
 
 fn part(id: &str, kind: PartKind, content: &str) -> Part {
-    Part {
-        id: id.to_string(),
-        kind,
-        content: content.to_string(),
-        attachment: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_replay: None,
-        prune_state: PruneState::Intact,
-        reasoning_meta: None,
-        response_meta: None,
+    match kind {
+        PartKind::Text => Part::text(id.to_string(), content.to_string(), None),
+        PartKind::Attachment => Part::attachment_part(id.to_string(), content.to_string(), None),
+        PartKind::Code => Part::code(id.to_string(), content.to_string()),
+        PartKind::Output => Part::output(id.to_string(), content.to_string()),
+        PartKind::Error => Part::error(id.to_string(), content.to_string()),
+        PartKind::Prose => Part::prose(id.to_string(), content.to_string(), None),
+        PartKind::ToolCall => Part::tool_call(
+            id.to_string(),
+            content.to_string(),
+            String::new(),
+            String::new(),
+            None,
+        ),
+        PartKind::ToolResult => Part::tool_result(
+            id.to_string(),
+            content.to_string(),
+            String::new(),
+            String::new(),
+        ),
+        PartKind::Reasoning => Part::reasoning(id.to_string(), content.to_string(), None),
     }
 }
 

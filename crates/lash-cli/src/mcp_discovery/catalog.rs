@@ -1,3 +1,4 @@
+//! MCP catalog projection.
 use lash_core::CompactToolContract;
 use serde_json::{Value, json};
 
@@ -31,7 +32,7 @@ impl CatalogTool {
         // discovery fact this example needs.
         #[cfg(feature = "lashlang")]
         let (module_path, operation, call, aliases) = {
-            let binding: lash_lashlang_runtime::LashlangToolBinding = obj
+            let binding: lash_lashlang_runtime::ToolBinding = obj
                 .get("bindings")
                 .and_then(|bindings| bindings.get(lash_lashlang_runtime::LASHLANG_TOOL_BINDING_KEY))
                 .cloned()

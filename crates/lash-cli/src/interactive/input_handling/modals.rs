@@ -62,6 +62,10 @@ async fn execute_command_palette_action(
             let slash_ctx = ctx.slash_ctx();
             super::super::commands::handle_builtin_command(command, slash_ctx).await
         }
+        CommandPaletteAction::NewSession(dialect) => {
+            let slash_ctx = ctx.slash_ctx();
+            super::super::commands::handle_new_session(dialect, slash_ctx).await
+        }
         CommandPaletteAction::InsertDraft(draft) => {
             ctx.app.set_input(draft);
             ctx.app.update_suggestions();
@@ -74,11 +78,20 @@ async fn execute_command_palette_action(
     }
 }
 
-fn apply_theme_choice(choice: ThemeName, app: &mut App, provider: &lash::provider::ProviderHandle) {
+fn apply_theme_choice(
+    choice: ThemeName,
+    app: &mut App,
+    _provider: &lash::provider::ProviderHandle,
+) {
     theme::set_active_theme(choice);
-    let mut config =
-        LashConfig::load(&crate::paths::config_file()).unwrap_or_else(|| LashConfig::new(provider));
-    config.upsert_provider(provider);
+    let Some(mut config) = LashConfig::load(&crate::paths::config_file()) else {
+        push_system_message(
+            app,
+            "Theme changed, but no provider config is available to save it.",
+        );
+        app.dirty = true;
+        return;
+    };
     config.theme = choice;
     match config.save(&crate::paths::config_file()) {
         Ok(()) => app.show_toast(

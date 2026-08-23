@@ -51,10 +51,10 @@ fn parse_variant_input(input: &str) -> Result<String, String> {
 }
 
 pub(crate) fn validate_model_selection(
-    provider: &ProviderHandle,
-    selection: &ModelSelection,
+    _provider: &ProviderHandle,
+    _selection: &ModelSelection,
 ) -> Result<(), String> {
-    provider.validate_model_name(&selection.model)
+    Ok(())
 }
 
 /// Curated model limits that take precedence over models.dev — only for
@@ -84,7 +84,6 @@ pub(crate) fn resolve_model_selection(
     selection: &ModelSelection,
     catalog: &CachedModelCatalog,
 ) -> Result<ResolvedModelSpec, String> {
-    provider.validate_model_name(&selection.model)?;
     let configured_model = selection.model.trim();
     let catalog_model_id =
         crate::provider_metadata::provider_catalog_model_id(provider.kind(), configured_model);

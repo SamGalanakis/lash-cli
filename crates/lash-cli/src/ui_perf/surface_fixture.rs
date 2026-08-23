@@ -235,34 +235,40 @@ impl TuiExtension for SurfaceBenchmarkTuiExtension {
 
     fn handle_turn_event(&self, event: &lash_core::TurnEvent) -> Vec<TuiHostEffect> {
         match event {
-            lash_core::TurnEvent::AssistantProseDelta { text } if text == "ui_perf_mount" => vec![
-                TuiHostEffect::MountSurface {
-                    spec: TuiSurfaceSpec {
+            lash_core::TurnEvent::AssistantProseDelta { text }
+                if text.as_ref() == "ui_perf_mount" =>
+            {
+                vec![
+                    TuiHostEffect::MountSurface {
+                        spec: TuiSurfaceSpec {
+                            key: "workspace".to_string(),
+                            slot: TuiSurfaceSlot::Workspace,
+                            size: TuiSurfaceSize::Auto,
+                            order: 0,
+                            focusable: true,
+                            visible: true,
+                            modal: false,
+                        },
+                    },
+                    TuiHostEffect::MountSurface {
+                        spec: TuiSurfaceSpec {
+                            key: "footer".to_string(),
+                            slot: TuiSurfaceSlot::Footer,
+                            size: TuiSurfaceSize::Lines(1),
+                            order: 0,
+                            focusable: false,
+                            visible: true,
+                            modal: false,
+                        },
+                    },
+                    TuiHostEffect::FocusSurface {
                         key: "workspace".to_string(),
-                        slot: TuiSurfaceSlot::Workspace,
-                        size: TuiSurfaceSize::Auto,
-                        order: 0,
-                        focusable: true,
-                        visible: true,
-                        modal: false,
                     },
-                },
-                TuiHostEffect::MountSurface {
-                    spec: TuiSurfaceSpec {
-                        key: "footer".to_string(),
-                        slot: TuiSurfaceSlot::Footer,
-                        size: TuiSurfaceSize::Lines(1),
-                        order: 0,
-                        focusable: false,
-                        visible: true,
-                        modal: false,
-                    },
-                },
-                TuiHostEffect::FocusSurface {
-                    key: "workspace".to_string(),
-                },
-            ],
-            lash_core::TurnEvent::AssistantProseDelta { text } if text == "ui_perf_overlay" => {
+                ]
+            }
+            lash_core::TurnEvent::AssistantProseDelta { text }
+                if text.as_ref() == "ui_perf_overlay" =>
+            {
                 vec![
                     TuiHostEffect::MountSurface {
                         spec: TuiSurfaceSpec {
@@ -307,7 +313,7 @@ pub(crate) fn build_benchmark_harness(
             apply_ui_host_effects(
                 &mut app,
                 ui_extensions.effects_for_turn_event(&lash_core::TurnEvent::AssistantProseDelta {
-                    text: "ui_perf_mount".to_string(),
+                    text: "ui_perf_mount".into(),
                 }),
             );
             if scenario == UiPerfScenario::WorkspaceOverlay {
@@ -315,7 +321,7 @@ pub(crate) fn build_benchmark_harness(
                     &mut app,
                     ui_extensions.effects_for_turn_event(
                         &lash_core::TurnEvent::AssistantProseDelta {
-                            text: "ui_perf_overlay".to_string(),
+                            text: "ui_perf_overlay".into(),
                         },
                     ),
                 );

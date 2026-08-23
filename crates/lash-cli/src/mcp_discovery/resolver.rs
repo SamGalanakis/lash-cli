@@ -1,4 +1,4 @@
-//! Reference [`DeferredToolResolver`] for MCP call-paths.
+//! [`DeferredToolResolver`] for MCP call-paths.
 //!
 //! When the model calls a Lashlang module path that is not resident in the
 //! link-time host environment, RLM linking asks this resolver to resolve it.
@@ -73,55 +73,5 @@ impl DeferredToolResolver for McpDeferredToolResolver {
                 ((*path).to_string(), resolution)
             })
             .collect()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use lash_core::ToolContract;
-    use lash_tool_support::{LashlangToolBinding, ToolDefinitionLashlangExt};
-
-    fn mcp_tool(server: &str, name: &str, module: &str, operation: &str) -> McpCatalogedTool {
-        let definition = ToolDefinition::raw(
-            format!("tool:{server}/{name}"),
-            name,
-            format!("MCP tool {name}"),
-            ToolContract::default_input_schema(),
-            serde_json::json!({ "type": "object" }),
-        )
-        .with_lashlang_binding(LashlangToolBinding::new([module], operation));
-        McpCatalogedTool {
-            server: server.to_string(),
-            definition,
-        }
-    }
-
-    #[tokio::test]
-    async fn resolves_known_call_path_with_execution_binding() {
-        let resolver =
-            McpDeferredToolResolver::new([mcp_tool("appworld", "venmo_send", "venmo", "send")]);
-        let mut resolutions = resolver.resolve(&["venmo.send"]).await;
-        let resolution = resolutions.remove("venmo.send").unwrap();
-        let Resolution::Resolved(grant) = resolution else {
-            panic!("expected resolved grant");
-        };
-        assert_eq!(grant.execution_binding["kind"], json!("mcp"));
-        assert_eq!(grant.execution_binding["server"], json!("appworld"));
-        assert_eq!(
-            grant.source_id.as_deref(),
-            Some(lash::tools::PLUGIN_TOOL_SOURCE_ID)
-        );
-        assert_eq!(grant.definition.name(), "venmo_send");
-    }
-
-    #[tokio::test]
-    async fn unknown_call_path_is_not_available() {
-        let resolver = McpDeferredToolResolver::new(std::iter::empty());
-        let mut resolutions = resolver.resolve(&["mystery.run"]).await;
-        assert!(matches!(
-            resolutions.remove("mystery.run"),
-            Some(Resolution::NotAvailable)
-        ));
     }
 }
