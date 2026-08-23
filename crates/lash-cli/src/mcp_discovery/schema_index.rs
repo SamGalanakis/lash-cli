@@ -9,10 +9,6 @@ pub(crate) fn semantic_index_text(tool: &CatalogTool) -> String {
         tool.contract.render_signature(),
         tool.contract.description.clone(),
     ];
-    let return_details = tool.contract.render_returns();
-    if !return_details.is_empty() {
-        parts.push(return_details);
-    }
     parts.extend(tool.contract.examples.clone());
     parts
         .into_iter()
