@@ -21,7 +21,7 @@ jobs:
           components: rustfmt, clippy
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
@@ -62,7 +62,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
       - uses: Swatinem/rust-cache@v2
       - name: Install cross compiler
         if: runner.os == 'Linux' && matrix.packages != ''

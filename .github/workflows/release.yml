@@ -85,7 +85,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.15.2
+          version: 0.16.0
       - name: Install cross compiler
         if: runner.os == 'Linux' && matrix.packages != ''
         run: scripts/ci-install-apt-packages.sh ${{ matrix.packages }}
