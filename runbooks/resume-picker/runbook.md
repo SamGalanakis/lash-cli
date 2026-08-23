@@ -29,10 +29,10 @@ when any non-empty session exists; show `No messages yet` when only empties exis
 
 ## Working material
 
-- One `--lash-home DIR` fixed across the run so sessions persist in `DIR/sessions/*.db`.
+- One `--lash-home DIR` fixed across the run so sessions persist in the unified
+  `DIR/store/durable-core.db` catalog and picker metadata in `DIR/sessions/*.ui.json`.
   Seed with `/clear`, which persists the current session and opens a fresh one, printing
-  `Started new session: <name>`. Space each `/clear` with `wait 2` — session filenames are
-  `YYYYMMDD_HHMMSS.db`, so rolls within one second collide.
+  `Started new session: <name>`.
 - Non-empty seed: submit `hello from pty` (its user row makes the session's `message_count
   > 0` and its picker preview `hello from pty`).
 

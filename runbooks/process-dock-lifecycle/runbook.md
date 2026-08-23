@@ -100,7 +100,7 @@ tokens — deliberate).
 1. **Start a process.** Drive a turn whose tool starts a durable background process. Gate:
    the `Background` dock renders a row `◆ running · <producer> · <label> · <elapsed>`
    (`crates/lash-cli/src/render/sections/docks.rs`). Objective cross-check:
-   `LASH_HOME/sessions/*.processes.db`
+   `LASH_HOME/store/processes.db`
    records the process; a `list_process_handles` activity, if driven, reports it `running`.
 2. **Focus and inspect.** With an empty prompt, `Tab` to focus the dock row (it gains the
    `SELECTED` badge / `▶` glyph); `Enter` opens its overview. Gate: the focused row and the

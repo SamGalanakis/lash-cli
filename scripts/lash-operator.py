@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import codecs
+import json
 import os
 import pty
 import re
@@ -129,12 +130,17 @@ def build_binary(use_test_provider: bool) -> None:
 
 
 def lash_bin() -> Path:
-    return repo_root() / "target" / "debug" / "lash"
+    metadata = subprocess.run(
+        ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+        cwd=repo_root(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(json.loads(metadata.stdout)["target_directory"]) / "debug" / "lash"
 
 
 def write_test_provider_config(lash_home: Path, scenario: str) -> None:
-    import json
-
     lash_home.mkdir(parents=True, exist_ok=True)
     config = {
         "active_provider": "test",

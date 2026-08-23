@@ -50,7 +50,8 @@ binary in a child PTY and reads line commands from stdin or `--script FILE`.
   `rlm-subagent-smoke` / `rlm-workspace-smoke` / `rlm-nonzero-exit-smoke` (need `-- -em rlm`).
 - `--no-build` launches the existing `target/debug/lash` instead of rebuilding.
 - `--lash-home DIR` fixes `LASH_HOME` so sessions and artifacts **persist across runs**
-  (sessions live in `DIR/sessions/*.db`). Omit it for a throwaway temp home.
+  (the catalog lives in `DIR/store/durable-core.db`; picker metadata lives in
+  `DIR/sessions/*.ui.json`). Omit it for a throwaway temp home.
 - `--trace PATH` passes `--debug-ui-trace PATH` to lash: a replayable UI-trace JSON plus a
   final snapshot — the same on-disk artifact the PTY smoke test asserts on.
 - `-- <lash args>` — everything after `--` is forwarded to `lash` (e.g. `-- -em rlm`).
@@ -90,7 +91,8 @@ it).
 
 Turns, tool calls, subagent spawns, and queued-turn dispatch are all async and render over
 several frames. Gate on the **rendered outcome** with `expect <secs> <text>` — never `wait
-N`. Submit a turn, then `expect <secs> <assistant-marker-text>`; the footer status walks
+N`. Submit a turn, then `expect <secs> <assistant-marker-text>`; the footer status includes
+the locked mode and dialect (for example `rlm · typescript`) and walks
 `Idle → Working → Thinking → Responding → Idle` (and `Running tool · <name>` for tool
 calls), so gate on the terminal render, not a fixed sleep. `wait` is only for letting the
 render settle before a `screen`, or spacing session-file writes so timestamp filenames
@@ -110,8 +112,9 @@ Prefer an objective signal over eyeballing. In order of authority:
    independent of what rendered: ops like `user_turn`, `queue_current_turn_input` (Early
    Injection), `queue_turn` (Next Full Turn). Use it to prove intent-vs-render (e.g. Enter
    mid-turn recorded exactly one `queue_current_turn_input` and zero `queue_turn`).
-3. **On-disk state** — `LASH_HOME/sessions/*.db` (durable session evidence; message counts
-   drive the resume picker), and `LASH_HOME/test-provider-requests.jsonl` (the visible user
+3. **On-disk state** — `LASH_HOME/store/durable-core.db` (durable session evidence),
+   `LASH_HOME/sessions/*.ui.json` (host roster metadata that drives the picker), and
+   `LASH_HOME/test-provider-requests.jsonl` (the visible user
    texts each provider call actually saw — objective proof of what reached the model, and
    how many times).
 

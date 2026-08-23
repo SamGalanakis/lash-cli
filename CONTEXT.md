@@ -10,9 +10,9 @@
 - `Ctrl+C` is reserved for cancel/dismiss/quit semantics: close suggestions or overlays, cancel an active turn, clear a non-empty draft, then quit only from an idle empty prompt.
 - Copy uses `Ctrl+Shift+C` by default. `Ctrl+U` deletes draft text to the start of the line, `Ctrl+K` deletes to the end, and history/document scrolling uses PgUp/PgDn, mouse wheel, and scroll gestures.
 - `Ctrl+P` opens the command and settings palette — a searchable overlay of settings actions (theme, model, variant, and other commands) applied directly without typing a slash command.
-- The status bar shows model and reasoning variant joined, then execution mode, then plugin modes, for example `gpt-5.5 medium · standard`; it carries no `lash` brand prefix. Context usage is labeled as `ctx`.
+- The status bar shows model and reasoning variant joined, then execution mode and the pinned RLM dialect when applicable, for example `gpt-5.5 medium · rlm · typescript`; it carries no `lash` brand prefix. Context usage is labeled as `ctx`.
 - Queue previews sit directly above the input. Early-injected work is labeled `Will send in this turn`; next-turn work is labeled `Queued for next turn`.
-- The `/resume` picker hides zero-turn sessions when any non-empty session exists. If only empty sessions exist it shows them with `No messages yet`; direct `/resume <id-or-name>` may still target any session.
+- The `/resume` picker hides zero-turn sessions when any non-empty session exists. If only empty sessions exist it shows them with `No messages yet`; direct `/resume <id-or-name>` may still target any session. Alpha-era per-session databases add the notice `N sessions from an older Lash are not openable` and are never opened.
 
 ## Autonomous CLI Testing
 

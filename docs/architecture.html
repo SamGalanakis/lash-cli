@@ -50,15 +50,21 @@
       <pre><code>arguments + ~/.lash/config.json
               │
               ▼
-provider factories + plugin factories + store
+host provider config + plugin factories + host policies
               │
               ▼
-        LashCore / LashSession
+LashCore::{standard,rlm}_builder
+  + ~/.lash/store/durable-core.db catalog
+  + process / trigger / effect / artifact / env stores
+  + attachment store + trace sink
+              │
+              ▼
+         LashSession facade
               │
        ┌──────┴────────┐
        ▼               ▼
 interactive TUI   --print / JSON / RPC</code></pre>
-      <p>Execution modes such as <code>standard</code> and <code>rlm</code> are Lash protocol plugins. The CLI chooses and configures one for a session; it does not implement protocol semantics itself.</p>
+      <p>Execution modes such as <code>standard</code> and <code>rlm</code> are Lash protocol plugins. The CLI chooses and configures one for a session; it does not implement protocol semantics itself. Every session lives in one Lash catalog under <code>~/.lash/store/</code>; the CLI keeps only display metadata in its host roster. Store preflight runs before provider or session startup, and shutdown flushes the trace sink before closing each core.</p>
     </section>
     <section class="section">
       <div class="section-header"><h2>Dependency rule</h2></div>

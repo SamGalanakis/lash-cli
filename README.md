@@ -34,8 +34,8 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-Lash dependencies are pinned to one exact upstream revision in the workspace
-manifest. Update that revision deliberately and verify this entire workspace.
+Lash dependencies are pinned to one exact commit on Lash `main`, never
+to a release tag. Update that revision deliberately and verify this entire workspace.
 
 The user-facing command, configuration directory (`~/.lash`), and session
 format remain `lash`; splitting the repository does not rename the product or

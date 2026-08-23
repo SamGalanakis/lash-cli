@@ -353,6 +353,71 @@ fn cli_interactive_pty_rlm_subagent_smoke_runs_turn_and_exits() {
 }
 
 #[test]
+fn cli_rlm_typescript_status_and_resume_conflict_are_pinned() {
+    let lash_home = test_lash_home("rlm-typescript-smoke");
+    let mut harness = start_interactive_harness_with_dialect(
+        &lash_home,
+        ExecutionMode::Rlm,
+        Some("typescript"),
+        None,
+    );
+    let status = harness
+        .wait_for_text("rlm · typescript", Duration::from_secs(15))
+        .expect("wait for TypeScript status bar");
+    assert!(
+        status.contains("rlm · typescript"),
+        "RLM TypeScript status was not rendered\nscreen:\n{status}"
+    );
+    harness.finish_cleanly().expect("finish TypeScript harness");
+
+    let session_id = std::fs::read_dir(lash_home.path().join("sessions"))
+        .expect("read session roster")
+        .filter_map(Result::ok)
+        .find_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_suffix(".ui.json"))
+                .map(str::to_string)
+        })
+        .expect("TypeScript session roster entry");
+    let output = run_lash_with_timeout(
+        Command::new(lash_bin())
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .env("LASH_HOME", lash_home.path())
+            .env("LASH_LOG", "warn")
+            .args([
+                "--resume",
+                &session_id,
+                "--execution-mode",
+                "rlm",
+                "--rlm-dialect",
+                "lashlang",
+                "--model",
+                "test/cli-e2e-model",
+                "--print",
+                "This must be refused before a turn starts",
+            ]),
+        Duration::from_secs(30),
+    );
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !output.status.success(),
+        "dialect conflict unexpectedly opened"
+    );
+    assert!(
+        combined.contains("RLM dialect conflict")
+            && combined.contains("typescript")
+            && combined.contains("lashlang"),
+        "conflict must name both dialects\noutput:\n{combined}"
+    );
+}
+
+#[test]
 fn cli_interactive_pty_rlm_uses_temporary_working_directory() {
     let workspace = tempfile::tempdir().expect("temp workspace");
     let lash_home = test_lash_home("rlm-workspace-smoke");
@@ -428,6 +493,15 @@ fn start_interactive_harness(
     execution_mode: ExecutionMode,
     working_dir: Option<&std::path::Path>,
 ) -> LiveHarness {
+    start_interactive_harness_with_dialect(lash_home, execution_mode, None, working_dir)
+}
+
+fn start_interactive_harness_with_dialect(
+    lash_home: &tempfile::TempDir,
+    execution_mode: ExecutionMode,
+    rlm_dialect: Option<&str>,
+    working_dir: Option<&std::path::Path>,
+) -> LiveHarness {
     let repo_root =
         repo_root_from_manifest_dir(env!("CARGO_MANIFEST_DIR")).expect("derive repo root");
     let mut config = HarnessConfig::new(repo_root);
@@ -435,6 +509,7 @@ fn start_interactive_harness(
     config.lash_home = Some(lash_home.path().to_path_buf());
     config.model = Some("test/cli-e2e-model".to_string());
     config.execution_mode = execution_mode;
+    config.rlm_dialect = rlm_dialect.map(str::to_string);
     config.working_dir = working_dir.map(std::path::Path::to_path_buf);
     config.build_lash = false;
     config.timeout = Duration::from_secs(45);
