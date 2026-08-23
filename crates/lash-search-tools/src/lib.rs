@@ -16,13 +16,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use lash_core::{
-    ToolCall, ToolDefinition, ToolFailureClass, ToolResult, ToolRetryPolicy, ToolScheduling,
-};
+use lash_core::{ToolCall, ToolDefinition, ToolFailureClass, ToolOutcome, ToolRetryPolicy};
 
 use lash_tool_support::{
-    StaticToolExecute, StaticToolProvider, ToolDefinitionLashlangExt, canonicalize_under,
-    invalid_tool_args, non_empty_string, typed_tool_args, typed_tool_ok,
+    StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
+    invalid_tool_args, tool_binding,
 };
 
 const DEFAULT_MAX_RESULTS: usize = 20;
@@ -148,12 +146,12 @@ impl Grep {
         }
     }
 
-    fn ensure_ready_for_query(&self, query: &str) -> Result<Arc<GrepBackend>, ToolResult> {
+    fn ensure_ready_for_query(&self, query: &str) -> Result<Arc<GrepBackend>, ToolOutcome> {
         let backend = self
             .backend
             .get_or_init(|| self.shared_backend())
             .as_ref()
-            .map_err(|err| ToolResult::err_fmt(format_args!("{err}")))?;
+            .map_err(|err| ToolOutcome::err_fmt(format_args!("{err}")))?;
         if !backend.picker.wait_for_scan(GREP_WALL_TIMEOUT) {
             return Err(timeout_grep_result(
                 query,
@@ -172,10 +170,10 @@ impl Grep {
 
     fn lock_cursors(
         cursor_store: &Mutex<CursorStore>,
-    ) -> Result<MutexGuard<'_, CursorStore>, ToolResult> {
+    ) -> Result<MutexGuard<'_, CursorStore>, ToolOutcome> {
         cursor_store
             .lock()
-            .map_err(|_| ToolResult::err_fmt(format_args!("Failed to acquire cursor store lock")))
+            .map_err(|_| ToolOutcome::err_fmt(format_args!("Failed to acquire cursor store lock")))
     }
 
     fn perform_grep(
@@ -186,7 +184,7 @@ impl Grep {
         max_results: usize,
         cursor_id: Option<&str>,
         control: &GrepRunControl,
-    ) -> Result<GrepOutput, ToolResult> {
+    ) -> Result<GrepOutput, ToolOutcome> {
         control.check(query)?;
         let file_offset = cursor_id
             .and_then(|id| cursor_store.lock().ok()?.get(id))
@@ -195,11 +193,11 @@ impl Grep {
         let (options, auto_expand) = make_grep_options(mode, file_offset, control);
 
         let guard = backend.picker.read().map_err(|err| {
-            ToolResult::err_fmt(format_args!("Failed to acquire picker lock: {err}"))
+            ToolOutcome::err_fmt(format_args!("Failed to acquire picker lock: {err}"))
         })?;
         let picker = guard
             .as_ref()
-            .ok_or_else(|| ToolResult::err_fmt(format_args!("File picker not initialized")))?;
+            .ok_or_else(|| ToolOutcome::err_fmt(format_args!("File picker not initialized")))?;
 
         let parser = QueryParser::new(AiGrepConfig);
         let parsed = parser.parse(query);
@@ -367,11 +365,13 @@ pub fn grep_provider() -> StaticToolProvider<Grep> {
 
 #[async_trait::async_trait]
 impl StaticToolExecute for Grep {
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         let cancellation_token = call.context.cancellation_token().cloned();
-        let args = match typed_tool_args::<GrepArgs>(call.args) {
+        let args = match serde_json::from_value::<GrepArgs>(call.args.clone()) {
             Ok(args) => args,
-            Err(err) => return err,
+            Err(err) => {
+                return invalid_tool_args(format!("Invalid tool arguments: {err}"));
+            }
         };
         self.execute_inner(args, cancellation_token).await
     }
@@ -388,12 +388,11 @@ fn grep_tool_definition() -> ToolDefinition {
                 r#"await files.grep({ query: "*.rs files.edit", path: "." })?"#.into(),
                 r#"await files.grep({ query: "current_query" })?"#.into(),
             ])
-            .with_lashlang_binding(lash_tool_support::lashlang_binding(
+            .with_tool_binding(tool_binding(
                 ["files"],
                 "grep",
                 &["search_files", "ripgrep"],
             ))
-            .with_scheduling(ToolScheduling::Parallel)
             .with_retry_policy(ToolRetryPolicy::safe(2, 50, 150))
 }
 
@@ -402,9 +401,9 @@ impl Grep {
         &self,
         args: GrepArgs,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    ) -> ToolResult {
-        if let Err(err) = non_empty_string(&args.query, "query") {
-            return err;
+    ) -> ToolOutcome {
+        if args.query.is_empty() {
+            return invalid_tool_args("Missing required parameter: query");
         }
         if args.limit < 1 {
             return invalid_tool_args("Invalid limit: must be >= 1");
@@ -448,7 +447,7 @@ impl Grep {
                 Ok(PathScope::Directory(base_path)) => {
                     let backend = match backend_for_base(&base_path) {
                         Ok(backend) => backend,
-                        Err(err) => return ToolResult::err_fmt(format_args!("{err}")),
+                        Err(err) => return ToolOutcome::err_fmt(format_args!("{err}")),
                     };
                     if !backend.picker.wait_for_scan(GREP_WALL_TIMEOUT) {
                         return timeout_grep_result(
@@ -512,7 +511,7 @@ impl GrepRunControl {
         }
     }
 
-    fn check(&self, query: &str) -> Result<(), ToolResult> {
+    fn check(&self, query: &str) -> Result<(), ToolOutcome> {
         if self.abort_signal.load(Ordering::Relaxed) {
             return Err(cancelled_grep_result(query));
         }
@@ -544,7 +543,7 @@ async fn bounded_indexed_grep(
     max_results: usize,
     cursor: Option<String>,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
-) -> ToolResult {
+) -> ToolOutcome {
     let abort_signal = Arc::new(AtomicBool::new(false));
     let cancellation_watcher = cancellation_token.map(|token| {
         let abort_signal = Arc::clone(&abort_signal);
@@ -568,9 +567,9 @@ async fn bounded_indexed_grep(
     });
 
     let result = match tokio::time::timeout(GREP_WALL_TIMEOUT, handle).await {
-        Ok(Ok(Ok(value))) => typed_tool_ok(value),
+        Ok(Ok(Ok(value))) => serialize_grep_output(value),
         Ok(Ok(Err(err))) => err,
-        Ok(Err(err)) => ToolResult::err(grep_output_value(grep_error_output(
+        Ok(Err(err)) => ToolOutcome::err(grep_output_value(grep_error_output(
             &timeout_query,
             &timeout_query,
             "panic",
@@ -601,7 +600,7 @@ async fn direct_file_grep(
     default_base: Option<&Path>,
     max_results: usize,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
-) -> ToolResult {
+) -> ToolOutcome {
     let query = query.to_string();
     let file_path = file_path.to_path_buf();
     let default_base = default_base.map(Path::to_path_buf);
@@ -626,7 +625,7 @@ async fn direct_file_grep(
     });
     let result = match tokio::time::timeout(GREP_WALL_TIMEOUT, handle).await {
         Ok(Ok(result)) => result,
-        Ok(Err(err)) => ToolResult::err(grep_output_value(grep_error_output(
+        Ok(Err(err)) => ToolOutcome::err(grep_output_value(grep_error_output(
             &timeout_query,
             &timeout_query,
             "panic",
@@ -657,7 +656,7 @@ async fn direct_file_grep(
 fn resolve_path_scope(
     default_base: Option<&Path>,
     requested: &str,
-) -> Result<PathScope, ToolResult> {
+) -> Result<PathScope, ToolOutcome> {
     let candidate = Path::new(requested);
     // Resolve relative paths against the search base (falling back to the
     // process cwd) and then canonicalize on disk: search needs a real,
@@ -666,11 +665,16 @@ fn resolve_path_scope(
     let base = match default_base {
         Some(base) => base.to_path_buf(),
         None => std::env::current_dir().map_err(|err| {
-            ToolResult::err_fmt(format_args!("failed to resolve current directory: {err}"))
+            ToolOutcome::err_fmt(format_args!("failed to resolve current directory: {err}"))
         })?,
     };
-    let canonical = canonicalize_under(&base, candidate).map_err(|err| {
-        ToolResult::err_fmt(format_args!(
+    let resolved = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        base.join(candidate)
+    };
+    let canonical = std::fs::canonicalize(resolved).map_err(|err| {
+        ToolOutcome::err_fmt(format_args!(
             "`path` {requested} does not exist or is not accessible: {err}"
         ))
     })?;
@@ -788,14 +792,14 @@ fn direct_file_grep_sync(
     default_base: Option<&Path>,
     max_results: usize,
     abort_signal: &AtomicBool,
-) -> ToolResult {
+) -> ToolOutcome {
     if abort_signal.load(Ordering::Relaxed) {
         return cancelled_grep_result(query);
     }
     let metadata = match std::fs::metadata(file_path) {
         Ok(metadata) => metadata,
         Err(err) => {
-            return ToolResult::err(grep_output_value(grep_error_output(
+            return ToolOutcome::err(grep_output_value(grep_error_output(
                 query,
                 query,
                 "io",
@@ -807,7 +811,7 @@ fn direct_file_grep_sync(
         }
     };
     if !metadata.is_file() {
-        return ToolResult::err(grep_output_value(grep_error_output(
+        return ToolOutcome::err(grep_output_value(grep_error_output(
             query,
             query,
             "not_a_file",
@@ -821,7 +825,7 @@ fn direct_file_grep_sync(
         let mut extra = BTreeMap::new();
         extra.insert("size_bytes".to_string(), json!(metadata.len()));
         extra.insert("max_size_bytes".to_string(), json!(DIRECT_FILE_MAX_SIZE));
-        return ToolResult::err(grep_output_value(grep_error_output(
+        return ToolOutcome::err(grep_output_value(grep_error_output(
             query,
             query,
             "file_too_large",
@@ -835,13 +839,13 @@ fn direct_file_grep_sync(
     let parsed = QueryParser::new(AiGrepConfig).parse(query);
     let grep_text = parsed.grep_text();
     if grep_text.is_empty() {
-        return typed_tool_ok(empty_grep_result(query));
+        return serialize_grep_output(empty_grep_result(query));
     }
 
     let bytes = match std::fs::read(file_path) {
         Ok(bytes) => bytes,
         Err(err) => {
-            return ToolResult::err(grep_output_value(grep_error_output(
+            return ToolOutcome::err(grep_output_value(grep_error_output(
                 query,
                 &grep_text,
                 "io",
@@ -911,7 +915,7 @@ fn direct_file_grep_sync(
         Vec::new()
     };
 
-    typed_tool_ok(GrepOutput {
+    serialize_grep_output(GrepOutput {
         query: query.to_string(),
         query_used: grep_text,
         broadened_from: None,
@@ -933,6 +937,16 @@ fn direct_file_grep_sync(
         cancelled: false,
         error: None,
     })
+}
+
+fn serialize_grep_output(output: GrepOutput) -> ToolOutcome {
+    match serde_json::to_value(output) {
+        Ok(value) => ToolOutcome::ok(value),
+        Err(err) => execution_failure(
+            "tool_result_serialization_failed",
+            format!("Failed to serialize grep result: {err}"),
+        ),
+    }
 }
 
 enum DirectMatcher {
@@ -1168,7 +1182,7 @@ fn grep_error_output(
     }
 }
 
-fn timeout_grep_result(query: &str, stage: &str, budget: Duration, message: &str) -> ToolResult {
+fn timeout_grep_result(query: &str, stage: &str, budget: Duration, message: &str) -> ToolOutcome {
     let mut extra = BTreeMap::new();
     extra.insert("budget_ms".to_string(), json!(budget.as_millis() as u64));
     let raw = grep_output_value(grep_error_output(
@@ -1190,11 +1204,11 @@ fn timeout_grep_result(query: &str, stage: &str, budget: Duration, message: &str
         Some(50),
     );
     failure.raw = Some(lash_core::ToolValue::from(raw));
-    ToolResult::failure(failure)
+    ToolOutcome::failure(failure)
 }
 
-fn cancelled_grep_result(query: &str) -> ToolResult {
-    ToolResult::cancelled_with_raw(
+fn cancelled_grep_result(query: &str) -> ToolOutcome {
+    ToolOutcome::cancelled_with_raw(
         "grep cancelled",
         grep_output_value(grep_error_output(
             query,
