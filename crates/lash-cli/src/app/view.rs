@@ -2,36 +2,115 @@ use super::*;
 
 impl App {
     pub fn clear(&mut self) {
-        self.reset_automatic_tool_catalog_sync();
-        self.timeline = Vec::new().into();
-        self.scroll_offset = 0;
-        self.follow_mode = FollowOutputMode::PinnedBottom;
-        self.live.assistant.clear();
-        self.live.reasoning.clear();
         self.clear_status();
-        self.editor.pending_images.clear();
-        self.editor.pending_large_pastes.clear();
-        self.clear_live_tool_output();
-        self.queues.draft_presentations.clear();
-        self.clear_pending_turn_input_snapshot();
-        self.overlay = None;
-        self.activity_state.reset();
-        self.ui_activity_journal = UiActivityJournal::default();
-        self.pending_ui_activity_records.clear();
-        self.active_ui_turn_ordinal = None;
-        self.next_lashlang_block_ordinal = 0;
-        self.lashlang_block_anchors.clear();
-        self.usage.token_usage = TokenUsage::default();
-        self.usage.last_response_usage = TokenUsage::default();
-        self.usage.last_prompt_usage = None;
-        self.usage.live_output_chars_estimate = 0;
-        self.usage.live_output_tokens_estimate = 0;
-        self.model_variant = None;
-        self.clear_mode_indicators();
-        self.plan_dock = None;
-        self.processes.clear();
-        self.selected_process_id = None;
-        self.invalidate_height_cache();
+
+        // Session-switch reset. EVERY App field must be classified below, exactly
+        // once: either reset (session-scoped) or bound as carried (process-scoped).
+        // Adding a field to App fails compilation here until you decide its fate.
+        // The editor carries typed input and history; pending images and large pastes
+        // are the process-scoped exception reset below.
+        let App {
+            // ---- carried across session switches (process/config-scoped) ----
+            expand_level: _,
+            tick: _,
+            dirty,
+            render_cache,
+            editor,
+            skills: _,
+            focused: _,
+            model: _,
+            repo_status: _,
+            ui_extensions: _,
+            chrome_state: _,
+            cwd: _,
+            history_area: _,
+            file_index: _,
+            // ---- reset (session-scoped) ----
+            timeline,
+            scroll_offset,
+            foreground_turn_active,
+            run_state,
+            iteration,
+            live,
+            follow_mode,
+            history_top_pad,
+            queues,
+            overlay,
+            usage,
+            model_variant,
+            execution_mode_label,
+            rlm_dialect_label,
+            automatic_tool_catalog_sync,
+            session_name,
+            session_id,
+            plugin_mode_indicators,
+            plan_dock,
+            processes,
+            selected_process_id,
+            activity_state,
+            ui_activity_journal,
+            pending_ui_activity_records,
+            active_ui_turn_ordinal,
+            next_lashlang_block_ordinal,
+            lashlang_block_anchors,
+            manual_interrupt_requested,
+            active_turn_id,
+            pending_retry_status,
+            selection,
+            toast,
+            suppress_mouse_up_after_selection_clear,
+        } = self;
+
+        let mark_dirty =
+            !queues.pending_turn_input_snapshot.is_empty() || !plugin_mode_indicators.is_empty();
+
+        *timeline = UiTimeline::default();
+        *scroll_offset = 0;
+        *foreground_turn_active = false;
+        *run_state = CliRunState::Idle;
+        *iteration = 0;
+        *live = LiveTurnView::default();
+        *follow_mode = FollowOutputMode::PinnedBottom;
+        *history_top_pad = 0;
+        editor.pending_images.clear();
+        editor.pending_large_pastes.clear();
+        *queues = Queues::default();
+        *overlay = None;
+        // context_window is model-scoped (set only at startup, /model, and
+        // resume); wiping it here would let the next session-switch policy
+        // fall back to a 1-token window.
+        *usage = UsageState {
+            context_window: usage.context_window,
+            ..UsageState::default()
+        };
+        *model_variant = None;
+        *execution_mode_label = "standard".to_string();
+        *rlm_dialect_label = None;
+        *automatic_tool_catalog_sync = Default::default();
+        session_name.clear();
+        session_id.clear();
+        plugin_mode_indicators.clear();
+        *plan_dock = None;
+        processes.clear();
+        *selected_process_id = None;
+        activity_state.reset();
+        *ui_activity_journal = UiActivityJournal::default();
+        pending_ui_activity_records.clear();
+        *active_ui_turn_ordinal = None;
+        *next_lashlang_block_ordinal = 0;
+        lashlang_block_anchors.clear();
+        *manual_interrupt_requested = false;
+        *active_turn_id = None;
+        *pending_retry_status = None;
+        *selection = TextSelection::default();
+        *toast = None;
+        *suppress_mouse_up_after_selection_clear = false;
+
+        if mark_dirty {
+            *dirty = true;
+        }
+        render_cache.dirty_from = 0;
+        render_cache.blocks.clear();
     }
 
     pub fn restore_prepared_turn(&mut self, turn: PreparedTurn) {
@@ -538,6 +617,7 @@ mod tests {
             5,
         );
         app.journal_lashlang_activity(Some((0, 0)), &activity);
+        app.usage.context_window = Some(1_310_720);
         assert!(!app.ui_activity_journal.is_empty());
         assert!(!app.pending_ui_activity_records().is_empty());
 
@@ -545,5 +625,6 @@ mod tests {
 
         assert!(app.ui_activity_journal.is_empty());
         assert!(app.pending_ui_activity_records().is_empty());
+        assert_eq!(app.usage.context_window, Some(1_310_720));
     }
 }

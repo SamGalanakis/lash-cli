@@ -34,7 +34,7 @@ async fn activate_opened_session(
     provider: &ProviderHandle,
 ) -> Result<(), String> {
     *runtime = Some(opened.session);
-    app.reset_automatic_tool_catalog_sync();
+    app.clear();
     *logger = opened.logger;
     resume::load_resumed_session(
         opened.bootstrap.filename(),
@@ -136,7 +136,7 @@ pub(super) async fn handle_clear(
         .fresh(policy, *current_execution_mode, new_rlm_dialect)
         .await?;
     *runtime = Some(opened.session);
-    app.reset_automatic_tool_catalog_sync();
+    app.clear();
     *logger = opened.logger;
     let Some(session) = runtime.as_ref() else {
         return Err(anyhow::anyhow!("opened session was not installed"));
@@ -159,7 +159,6 @@ pub(super) async fn handle_clear(
     history.clear();
     *turn_counter = 0;
     *last_turn = None;
-    app.clear();
     app.set_model_variant(current_model_variant.clone());
     app.set_execution_mode_label(current_execution_mode);
     app.timeline.push(UiTimelineItem::SystemMessage(format!(
