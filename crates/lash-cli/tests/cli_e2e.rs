@@ -139,18 +139,14 @@ fn cli_interactive_pty_smoke_runs_turn_and_exits() {
 }
 
 #[test]
-fn cli_interactive_pty_active_steer_escape_replays_once() {
-    let lash_home = test_lash_home("standard-gated-escape");
+fn cli_interactive_pty_active_steer_escape_restores_editor_without_replay() {
+    let lash_home = test_lash_home("standard-slow-echo");
     let mut harness = start_interactive_harness(&lash_home, ExecutionMode::Standard, None);
 
     harness
-        .send_line("gated initial prompt")
-        .expect("send gated prompt");
-    wait_for_provider_marker(
-        lash_home.path(),
-        "gated-initial-started",
-        Duration::from_secs(10),
-    );
+        .send_line("slow initial prompt")
+        .expect("send slow prompt");
+    std::thread::sleep(Duration::from_millis(250));
     harness
         .type_text("queued after escape")
         .expect("type active steer");
@@ -163,22 +159,20 @@ fn cli_interactive_pty_active_steer_escape_replays_once() {
         .wait_for_text("Manually interrupted.", Duration::from_secs(30))
         .expect("wait for manual interrupt marker");
     harness
-        .wait_for_text(
-            "test-provider echo: queued after escape",
-            Duration::from_secs(45),
-        )
-        .expect("wait for deferred active steer response");
+        .wait_for_text("queued after escape", Duration::from_secs(10))
+        .expect("wait for restored editor draft");
 
-    let run = harness.finish_cleanly().expect("finish harness");
+    let restored_screen = harness.screen_text().expect("read restored editor screen");
     assert!(
-        run.screen_text.contains("Manually interrupted.")
-            && run
-                .screen_text
-                .contains("test-provider echo: queued after escape"),
-        "final screen should show the interrupted first turn and exactly-once replayed steer\nscreen:\n{}\nartifacts: {}",
-        run.screen_text,
-        run.artifacts.output_dir.display()
+        restored_screen.contains("Manually interrupted.")
+            && restored_screen.contains("queued after escape")
+            && !restored_screen.contains("test-provider echo: queued after escape"),
+        "screen should show the interrupted turn and restored, unsent steer\nscreen:\n{restored_screen}"
     );
+    harness
+        .press_key("Ctrl-C")
+        .expect("clear restored draft before clean exit");
+    let run = harness.finish_cleanly().expect("finish harness");
 
     let trace = std::fs::read_to_string(&run.artifacts.ui_trace_json).unwrap_or_else(|err| {
         panic!(
@@ -206,8 +200,8 @@ fn cli_interactive_pty_active_steer_escape_replays_once() {
             .flatten()
             .filter(|text| text.as_str() == "queued after escape")
             .count(),
-        1,
-        "deferred steer should appear in provider requests exactly once\nrequests:\n{provider_requests:#?}"
+        0,
+        "restored steer must not be sent automatically on the next turn\nrequests:\n{provider_requests:#?}"
     );
 }
 
@@ -592,18 +586,6 @@ fn provider_request_visible_user_texts(lash_home: &std::path::Path) -> Vec<Vec<S
                 .collect::<Vec<_>>()
         })
         .collect()
-}
-
-fn wait_for_provider_marker(lash_home: &std::path::Path, marker: &str, timeout: Duration) {
-    let path = lash_home.join(marker);
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if path.exists() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(25));
-    }
-    panic!("timed out waiting for provider marker {}", path.display());
 }
 
 fn screen_cell_for(screen: &str, needle: &str) -> Option<(u16, u16)> {

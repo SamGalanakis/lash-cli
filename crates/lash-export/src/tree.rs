@@ -1,4 +1,4 @@
-//! Multi-session export — load host-rostered descendants reachable from a
+//! Multi-session export — load catalogued descendants reachable from a
 //! root session and classify cross-session edges created by `spawn_agent`.
 //!
 //! Lash main keeps sessions in one durable-core catalog. Each session carries
@@ -10,13 +10,15 @@
 //! record carries `context.session_id`; we partition `LlmPromptSnapshot`s
 //! by that field so each session in the tree gets its matching prompts.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use lash::persistence::{ChronologicalEntry, SessionMeta, SessionRelation};
 
 use crate::trace::{LlmPromptSnapshot, load_prompts_from_trace};
-use crate::{LoadSessionError, load_session, open_session, preflight_store};
+use crate::{
+    LoadSessionError, load_session, open_session_metadata, open_session_read_only, preflight_store,
+};
 
 /// One session in the tree, ready to render.
 pub struct LoadedSessionNode {
@@ -106,7 +108,7 @@ impl LoadedSessionTree {
     }
 }
 
-/// Load the root and the host-supplied roster, retaining descendants of root.
+/// Load the root and durable catalog, retaining descendants of root.
 ///
 /// `trace_path` may cover any subset of sessions in the tree; prompts are
 /// partitioned by `context.session_id`. Sessions for which no prompts are
@@ -114,7 +116,7 @@ impl LoadedSessionTree {
 pub async fn load_tree_from_paths(
     store_root: &Path,
     root_session_id: &str,
-    session_ids: &[String],
+    _session_ids: &[String],
     trace_path: &Path,
 ) -> Result<LoadedSessionTree, LoadSessionError> {
     preflight_store(store_root).await?;
@@ -129,22 +131,21 @@ pub async fn load_tree_from_paths(
     }
 
     let mut candidates: Vec<CandidateLoad> = Vec::new();
-    let mut roster = Vec::with_capacity(session_ids.len().saturating_add(1));
-    let mut seen = HashSet::with_capacity(session_ids.len().saturating_add(1));
-    roster.push(root_session_id.to_string());
-    seen.insert(root_session_id.to_string());
-    roster.extend(
-        session_ids
-            .iter()
-            .filter(|session_id| seen.insert((*session_id).clone()))
-            .cloned(),
-    );
-    for session_id in roster {
-        let store = open_session(store_root, &session_id).await?;
-        let loaded = load_session(&*store, &session_id).await?;
-        let Some(meta) = loaded.meta else {
-            return Err(LoadSessionError::SessionNotFound(session_id));
-        };
+    let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(store_root);
+    let summaries = lash::persistence::SessionStoreFactory::list_sessions(
+        &factory,
+        &lash::SessionListFilter {
+            relation: None,
+            deleted: Some(false),
+        },
+    )
+    .await
+    .map_err(LoadSessionError::Store)?;
+    for summary in summaries {
+        let session_id = summary.session_id;
+        let read_view = open_session_read_only(store_root, &session_id).await?;
+        let meta = open_session_metadata(store_root, &session_id).await?;
+        let loaded = load_session(&read_view, &session_id, Some(meta.clone()))?;
         candidates.push(CandidateLoad {
             db_path: store_root.join("durable-core.db"),
             meta,

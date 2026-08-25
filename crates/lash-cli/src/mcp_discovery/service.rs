@@ -1,12 +1,12 @@
 //! MCP discovery service.
 use std::sync::{Arc, RwLock};
 
-use lash_core::{AttemptContext, ToolCall, ToolOutcome};
-use lash_tool_support::{StaticToolExecute, StaticToolProvider};
-use serde_json::{Value, json};
+use lash::tools::{AttemptContext, ToolCall, ToolOutcome};
+use lash_tool_support::{StaticToolExecute, StaticToolProvider, typed_args, typed_ok};
+use serde_json::Value;
 
 use super::common::{LLM_CANDIDATE_LIMIT, args_with_limit, catalog_key, limit_from_args};
-use super::definitions::search_tools_definition;
+use super::definitions::{SearchToolsArgs, search_tools_definition};
 use super::ranking::ToolDiscoveryIndex;
 use super::rerank::{
     llm_rerank_request, merge_llm_selection, parse_llm_tool_names, rerank_payment_action_intent,
@@ -115,7 +115,7 @@ impl ToolDiscoveryToolsProvider {
         let candidate_args = args_with_limit(args, LLM_CANDIDATE_LIMIT);
         let candidates = index.search(&candidate_args);
         if candidates.is_empty() {
-            return ToolOutcome::ok(json!([]));
+            return typed_ok(Vec::<serde_json::Value>::new());
         }
         let query = args
             .get("query")
@@ -156,11 +156,7 @@ impl ToolDiscoveryToolsProvider {
             }
         };
 
-        ToolOutcome::ok(json!(merge_llm_selection(
-            candidates,
-            selected_names,
-            limit
-        )))
+        typed_ok(merge_llm_selection(candidates, selected_names, limit))
     }
 }
 
@@ -178,9 +174,12 @@ pub fn tool_discovery_provider_with_catalog(
 impl StaticToolExecute for ToolDiscoveryToolsProvider {
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         match call.name {
-            "search_tools" => match call.context.sessions().shared_tool_catalog().await {
-                Ok(catalog) => self.search_tools(call.args, catalog, call.context).await,
-                Err(err) => ToolOutcome::err_fmt(err.to_string()),
+            "search_tools" => match typed_args::<SearchToolsArgs>(call.args) {
+                Err(outcome) => outcome,
+                Ok(_) => match call.context.sessions().shared_tool_catalog().await {
+                    Ok(catalog) => self.search_tools(call.args, catalog, call.context).await,
+                    Err(err) => ToolOutcome::err_fmt(err.to_string()),
+                },
             },
             _ => ToolOutcome::err_fmt(format_args!("Unknown tool: {}", call.name)),
         }

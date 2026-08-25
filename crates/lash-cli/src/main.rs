@@ -494,7 +494,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use lash_core::session_model::MessageRole;
+    use lash::messages::MessageRole;
 
     use crate::app::App;
     use crate::keybindings::{CopyBinding, copy_binding_from_env};

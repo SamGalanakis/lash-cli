@@ -8,7 +8,7 @@ use crate::assistant_text::normalize_assistant_text;
 use crate::prompt_model::PromptRequest;
 use crate::theme;
 use async_trait::async_trait;
-use lash_core::Part;
+use lash::messages::Part;
 use lash_tui_extensions::{
     SlashCommandSpec, TuiExtension, TuiExtensionContext, TuiExtensions, TuiHostEffect,
 };
@@ -18,18 +18,18 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 fn timeline_items_from_test_read_view(
-    events: &[lash_core::SessionHistoryRecord],
-    messages: &[lash_core::Message],
-    _tool_calls: &[lash_core::ToolCallRecord],
+    events: &[lash::persistence::SessionHistoryRecord],
+    messages: &[lash::messages::Message],
+    _tool_calls: &[lash::tools::ToolCallRecord],
     ui_state: &crate::app::UiProjectionState,
 ) -> Vec<crate::app::UiTimelineItem> {
-    let mut graph = lash_core::SessionGraph::default();
+    let mut graph = lash::persistence::SessionGraph::default();
     for event in events {
         match event {
-            lash_core::SessionHistoryRecord::Conversation(record) => {
+            lash::persistence::SessionHistoryRecord::Conversation(record) => {
                 graph.append_message(record.to_message());
             }
-            lash_core::SessionHistoryRecord::Protocol(event) => {
+            lash::persistence::SessionHistoryRecord::Protocol(event) => {
                 graph.append_protocol_event(event.clone());
             }
         }
@@ -37,7 +37,9 @@ fn timeline_items_from_test_read_view(
     let event_message_ids = events
         .iter()
         .filter_map(|event| match event {
-            lash_core::SessionHistoryRecord::Conversation(record) => Some(record.id.as_str()),
+            lash::persistence::SessionHistoryRecord::Conversation(record) => {
+                Some(record.id.as_str())
+            }
             _ => None,
         })
         .collect::<std::collections::HashSet<_>>();
@@ -47,11 +49,11 @@ fn timeline_items_from_test_read_view(
         .cloned()
         .collect::<Vec<_>>();
     graph.append_active_read_delta(&missing_messages);
-    let mut state = lash_core::SessionSnapshot::new(lash_core::SessionPolicy::new(
+    let mut state = lash::runtime::SessionSnapshot::new(lash::runtime::SessionPolicy::new(
         crate::host_policy::turn_budget(),
     ));
     state.session_graph = graph;
-    let read_view = lash_core::SessionReadView::from_snapshot(&state);
+    let read_view = lash::persistence::SessionReadView::from_snapshot(&state);
     timeline_from_read_view(&read_view, ui_state)
         .items()
         .to_vec()
@@ -353,9 +355,9 @@ fn prompt_panel_strips_redundant_h1_matching_panel_title() {
 
 #[test]
 fn interrupted_projection_hides_appended_skill_blocks_in_user_text() {
-    let message = lash_core::Message {
+    let message = lash::messages::Message {
         id: "m1".into(),
-        role: lash_core::MessageRole::User,
+        role: lash::messages::MessageRole::User,
         parts: vec![Part::text(
             "m1.p1".into(),
             "Use /wholehog\n\n<skill>\n<name>wholehog</name>\nbody\n</skill>".into(),
@@ -665,7 +667,7 @@ fn input_box_shows_ui_command_argument_hint_inline() {
 fn queue_preview_highlights_slash_command_slash() {
     let mut app = App::new("gpt-5.4".into(), "test".into(), "test-session-id".into());
     let turn = PreparedTurn::prepare("/retry later".into(), Vec::new(), &app.skills);
-    app.test_seed_queued_turn_snapshot(turn, lash_core::TurnInputIngress::NextTurn);
+    app.test_seed_queued_turn_snapshot(turn, lash::persistence::TurnInputIngress::NextTurn);
 
     let rendered = queue_preview_lines_snapshot(&app, 40);
     let item_line = rendered
@@ -740,7 +742,7 @@ fn queue_preview_highlights_multiple_detected_slash_commands() {
         Vec::new(),
         &app.skills,
     );
-    app.test_seed_queued_turn_snapshot(turn, lash_core::TurnInputIngress::NextTurn);
+    app.test_seed_queued_turn_snapshot(turn, lash::persistence::TurnInputIngress::NextTurn);
 
     let rendered = queue_preview_lines_snapshot(&app, 80);
     let slash_spans = rendered
@@ -1406,7 +1408,7 @@ fn live_reasoning_compacts_after_activity_appends_below_it() {
             call_id: None,
             name: "read_file".into(),
             args: serde_json::json!({ "path": "crates/lash/src/provider.rs" }),
-            output: lash_core::ToolCallOutput::success(
+            output: lash::tools::ToolCallOutput::success(
                 serde_json::json!({ "content": "provider code" }),
             ),
             duration_ms: 0,

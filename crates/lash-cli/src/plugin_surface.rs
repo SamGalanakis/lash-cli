@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use lash_core::PluginRuntimeEvent;
+use lash::plugins::PluginRuntimeEvent;
 
 use crate::app::{PlanDockItem, PlanDockItemStatus, PlanDockState, UiTimeline};
 

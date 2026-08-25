@@ -2,8 +2,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use futures_util::StreamExt as _;
 use lash::observe::LiveReplayGap;
 use lash::observe::{SessionCursor, SessionObservationEventPayload, SessionObservationStreamItem};
+use lash::runtime::{SessionPolicy, SessionSnapshot};
 use lash::{LashSession, TurnActivity, TurnActivityId, TurnEvent, TurnInput};
-use lash_core::{SessionPolicy, SessionSnapshot};
 use lash_tui_extensions::{
     KeyChord as UiKeyChord, KeyCode as UiKeyCode, KeyModifiers as UiKeyModifiers,
 };

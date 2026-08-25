@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::TokenUsage;
+use lash::usage::TokenUsage;
 use lash_tui::{Color, Column, ColumnWidth, Frame, Line, Rect, Style, Table, TableRow, TableState};
 use lash_tui_extensions::{
     TuiExtension, TuiExtensions, TuiHostEffect, TuiRenderContext, TuiSurfaceSize, TuiSurfaceSlot,
@@ -233,11 +233,9 @@ impl TuiExtension for SurfaceBenchmarkTuiExtension {
         }
     }
 
-    fn handle_turn_event(&self, event: &lash_core::TurnEvent) -> Vec<TuiHostEffect> {
+    fn handle_turn_event(&self, event: &lash::TurnEvent) -> Vec<TuiHostEffect> {
         match event {
-            lash_core::TurnEvent::AssistantProseDelta { text }
-                if text.as_ref() == "ui_perf_mount" =>
-            {
+            lash::TurnEvent::AssistantProseDelta { text } if text.as_ref() == "ui_perf_mount" => {
                 vec![
                     TuiHostEffect::MountSurface {
                         spec: TuiSurfaceSpec {
@@ -266,9 +264,7 @@ impl TuiExtension for SurfaceBenchmarkTuiExtension {
                     },
                 ]
             }
-            lash_core::TurnEvent::AssistantProseDelta { text }
-                if text.as_ref() == "ui_perf_overlay" =>
-            {
+            lash::TurnEvent::AssistantProseDelta { text } if text.as_ref() == "ui_perf_overlay" => {
                 vec![
                     TuiHostEffect::MountSurface {
                         spec: TuiSurfaceSpec {
@@ -312,18 +308,16 @@ pub(crate) fn build_benchmark_harness(
             );
             apply_ui_host_effects(
                 &mut app,
-                ui_extensions.effects_for_turn_event(&lash_core::TurnEvent::AssistantProseDelta {
+                ui_extensions.effects_for_turn_event(&lash::TurnEvent::AssistantProseDelta {
                     text: "ui_perf_mount".into(),
                 }),
             );
             if scenario == UiPerfScenario::WorkspaceOverlay {
                 apply_ui_host_effects(
                     &mut app,
-                    ui_extensions.effects_for_turn_event(
-                        &lash_core::TurnEvent::AssistantProseDelta {
-                            text: "ui_perf_overlay".into(),
-                        },
-                    ),
+                    ui_extensions.effects_for_turn_event(&lash::TurnEvent::AssistantProseDelta {
+                        text: "ui_perf_overlay".into(),
+                    }),
                 );
             }
             app.set_ui_extensions(ui_extensions);

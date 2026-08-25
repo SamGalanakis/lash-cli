@@ -1,11 +1,11 @@
 use std::cmp::Reverse;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
-use lash_core::TokenUsage;
-use lash_core::session_model::Message;
+use lash::messages::Message;
+use lash::usage::TokenUsage;
 
 use crate::app::{
     LiveToolOutput, PreparedTurn, UiActivityJournal, UiActivityRecord, UiTimeline, UiTimelineItem,
@@ -20,10 +20,6 @@ pub struct SessionInfo {
     pub first_message: String,
     pub modified: SystemTime,
     pub cwd: Option<PathBuf>,
-}
-
-pub struct SessionStart {
-    pub session_name: String,
 }
 
 pub struct LoadedSession {
@@ -104,6 +100,10 @@ impl SessionLogger {
         sessions_dir().join(format!("{session_id}.ui-activity.jsonl"))
     }
 
+    fn cancel_recovery_path_for(session_id: &str) -> PathBuf {
+        sessions_dir().join(format!("{session_id}.cancel-recovery.json"))
+    }
+
     pub fn record_host_input(&self, turn: &PreparedTurn) -> Result<()> {
         let mut roster = load_roster_entry(&self.session_id)?;
         roster.message_count = roster.message_count.saturating_add(1);
@@ -133,6 +133,35 @@ impl SessionLogger {
         }
         Ok(())
     }
+}
+
+pub(crate) fn save_cancel_recovery(session_id: &str, texts: &[String]) -> Result<()> {
+    std::fs::create_dir_all(sessions_dir())?;
+    std::fs::write(
+        SessionLogger::cancel_recovery_path_for(session_id),
+        serde_json::to_vec_pretty(texts)?,
+    )?;
+    Ok(())
+}
+
+pub(crate) fn clear_cancel_recovery(session_id: &str) -> Result<()> {
+    match std::fs::remove_file(SessionLogger::cancel_recovery_path_for(session_id)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+pub(crate) fn take_cancel_recovery(session_id: &str) -> Result<Vec<String>> {
+    let path = SessionLogger::cancel_recovery_path_for(session_id);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let texts = serde_json::from_slice(&bytes)?;
+    clear_cancel_recovery(session_id)?;
+    Ok(texts)
 }
 
 pub(crate) fn save_roster_entry(entry: &RosterEntry) -> Result<()> {
@@ -206,7 +235,7 @@ fn apply_host_inputs(timeline: &mut UiTimeline, roster: &RosterEntry) {
 
 pub(crate) fn load_opened_session(session: &lash::LashSession) -> Result<LoadedSession> {
     let session_id = session.session_id();
-    let roster = load_roster_entry(&session_id)?;
+    let roster = load_roster_entry(&session_id).ok();
     let read_view = session.read_view();
     let activity_journal = load_ui_activity_journal(&session_id)?;
     let ui_state = crate::app::UiProjectionState {
@@ -214,10 +243,14 @@ pub(crate) fn load_opened_session(session: &lash::LashSession) -> Result<LoadedS
         ..crate::app::UiProjectionState::default()
     };
     let mut blocks = timeline_from_read_view(&read_view, &ui_state);
-    apply_host_inputs(&mut blocks, &roster);
+    if let Some(roster) = roster.as_ref() {
+        apply_host_inputs(&mut blocks, roster);
+    }
     Ok(LoadedSession {
         session_id: session_id.clone(),
-        session_name: roster.session_name,
+        session_name: roster
+            .map(|entry| entry.session_name)
+            .unwrap_or_else(|| fallback_session_label(&session_id)),
         filename: session_id,
         messages: read_view.messages().to_vec(),
         blocks,
@@ -254,60 +287,84 @@ pub fn sessions_dir() -> PathBuf {
     crate::paths::sessions_dir()
 }
 
-pub async fn filename_for_session_identifier(identifier: &str) -> Option<String> {
+pub(crate) fn fallback_session_label(session_id: &str) -> String {
+    let short = session_id.get(..8).unwrap_or(session_id);
+    format!("session-{short}")
+}
+
+pub(crate) fn roster_session_id_for_display_name(identifier: &str) -> Option<String> {
     if load_roster_entry(identifier).is_ok() {
         return Some(identifier.to_string());
     }
-    list_recent_sessions(usize::MAX)
-        .await
-        .into_iter()
-        .find(|entry| {
-            load_roster_entry(&entry.session_id)
-                .is_ok_and(|roster| roster.session_name == identifier)
-        })
-        .map(|entry| entry.session_id)
-}
-
-pub async fn load_session_start(identifier: &str) -> Result<SessionStart> {
-    let session_id = filename_for_session_identifier(identifier)
-        .await
-        .ok_or_else(|| anyhow::anyhow!("Could not resolve session `{identifier}`"))?;
-    let roster = load_roster_entry(&session_id)?;
-    Ok(SessionStart {
-        session_name: roster.session_name,
-    })
-}
-
-pub async fn list_recent_sessions(limit: usize) -> Vec<SessionInfo> {
-    let mut sessions = std::fs::read_dir(sessions_dir())
+    std::fs::read_dir(sessions_dir())
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|entry| {
             let path = entry.path();
-            let name = path.file_name()?.to_str()?;
-            let session_id = name.strip_suffix(".ui.json")?;
+            let session_id = path.file_name()?.to_str()?.strip_suffix(".ui.json")?;
             let roster = load_roster_entry(session_id).ok()?;
-            if roster.parent_session_id.is_some() {
-                return None;
+            (roster.session_name == identifier).then_some(roster.session_id)
+        })
+        .next()
+}
+
+pub(crate) async fn resolve_session_identifier(
+    core: &lash::LashCore,
+    identifier: &str,
+) -> Result<Option<String>> {
+    let sessions = core
+        .sessions_filtered(lash::SessionListFilter {
+            relation: None,
+            deleted: Some(false),
+        })
+        .await?;
+    if sessions
+        .iter()
+        .any(|summary| summary.session_id == identifier)
+    {
+        return Ok(Some(identifier.to_string()));
+    }
+    Ok(sessions.into_iter().find_map(|summary| {
+        load_roster_entry(&summary.session_id)
+            .ok()
+            .filter(|roster| roster.session_name == identifier)
+            .map(|_| summary.session_id)
+    }))
+}
+
+pub(crate) async fn list_recent_sessions(
+    core: &lash::LashCore,
+    limit: usize,
+) -> Result<Vec<SessionInfo>> {
+    let summaries = core
+        .sessions_filtered(lash::SessionListFilter {
+            relation: Some(lash::SessionRelationKind::Root),
+            deleted: Some(false),
+        })
+        .await?;
+    let mut sessions = summaries
+        .into_iter()
+        .map(|summary| {
+            let roster = load_roster_entry(&summary.session_id).ok();
+            let modified_ms = summary.last_commit_at_ms.unwrap_or(summary.created_at_ms);
+            SessionInfo {
+                filename: summary.session_id.clone(),
+                session_id: summary.session_id,
+                message_count: roster.as_ref().map_or(0, |entry| entry.message_count),
+                first_message: roster
+                    .as_ref()
+                    .map(|entry| entry.first_message.clone())
+                    .filter(|message| !message.is_empty())
+                    .unwrap_or_else(|| "No messages yet".to_string()),
+                modified: SystemTime::UNIX_EPOCH + Duration::from_millis(modified_ms),
+                cwd: roster.and_then(|entry| entry.cwd),
             }
-            let modified = entry
-                .metadata()
-                .and_then(|metadata| metadata.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            Some(SessionInfo {
-                filename: session_id.to_string(),
-                session_id: session_id.to_string(),
-                message_count: roster.message_count,
-                first_message: roster.first_message,
-                modified,
-                cwd: roster.cwd,
-            })
         })
         .collect::<Vec<_>>();
     sessions.sort_by_key(|entry| Reverse(entry.modified));
     sessions.truncate(limit);
-    sessions
+    Ok(sessions)
 }
 
 pub(crate) fn incompatible_session_count() -> usize {

@@ -23,11 +23,11 @@ use std::sync::Arc;
 
 use lash::ModelSpec;
 use lash::persistence::FileAttachmentStore;
+use lash::plugins::{PluginSpec, StaticPluginFactory};
+use lash::runtime::SessionPolicy;
+use lash::tools::ToolProvider;
 use lash::tracing::TraceLevel;
-use lash_core::SessionPolicy;
-use lash_core::ToolProvider;
-use lash_core::plugin::{PluginSpec, StaticPluginFactory};
-use lash_plugin_mcp::{McpDeferredToolProvider, McpPluginFactory, McpToolProvider};
+use lash_plugin_mcp::{McpDeferredToolProvider, McpPluginFactory};
 use lash_tui::Terminal;
 use serde_json::Value as JsonValue;
 
@@ -485,10 +485,16 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     // Reference MCP deferred-resolution wiring (RLM only): resolve a Lashlang
     // call-path absent from the resident catalog into an MCP Tool Grant on
     // demand. Built from the MCP pool's currently enumerated tools.
-    let mcp_cataloged_tools = {
-        let provider = McpToolProvider::new(Arc::clone(mcp_factory.pool()));
-        crate::mcp_discovery::mcp_cataloged_tools("mcp", &provider)
-    };
+    let mcp_cataloged_tools = lash_config
+        .mcp_servers()
+        .keys()
+        .flat_map(|server| {
+            crate::mcp_discovery::mcp_cataloged_tools(
+                server,
+                mcp_factory.pool().advertised_tools_for_server(server),
+            )
+        })
+        .collect::<Vec<_>>();
     let has_deferred_mcp_catalog = execution_mode.is_rlm() && !mcp_cataloged_tools.is_empty();
     let mcp_catalog_records = if has_deferred_mcp_catalog {
         crate::mcp_discovery::mcp_catalog_records(&mcp_cataloged_tools)
@@ -651,7 +657,6 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
             },
             rlm_projected_bindings,
             mode,
-            runtime_factory.active_effect_host(),
         )
         .await;
         let shutdown = runtime_factory.shutdown().await;
@@ -669,7 +674,6 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
             },
             None,
             AutonomousMode::Rpc,
-            runtime_factory.active_effect_host(),
         )
         .await;
         let shutdown = runtime_factory.shutdown().await;

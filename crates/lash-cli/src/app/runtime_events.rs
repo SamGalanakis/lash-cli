@@ -1,6 +1,7 @@
 use super::*;
 use crate::assistant_text::push_assistant_text_block;
-use lash_core::{PluginRuntimeEvent, TurnActivity, TurnEvent, TurnInputApplication};
+use lash::plugins::PluginRuntimeEvent;
+use lash::{TurnActivity, TurnEvent, TurnInputApplication};
 
 fn runtime_status_from_plugin_event(
     event: &PluginRuntimeEvent,

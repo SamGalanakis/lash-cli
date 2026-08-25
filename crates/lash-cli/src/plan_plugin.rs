@@ -4,10 +4,11 @@ use lash::plugins::{
     PluginDirective, PluginError, PluginFactory, PluginRegistrar, PluginRuntimeEvent,
     PluginSessionContext, SessionPlugin,
 };
+use lash::tools::ToolDefinitionBindingExt;
 use lash::tools::{
     ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
 };
-use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+use lash_tool_support::{object_schema, tool_binding, typed_args, typed_ok};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const PLUGIN_ID: &str = "update_plan";
@@ -67,13 +68,14 @@ impl SessionPlugin for UpdatePlanPlugin {
                 }
                 let snapshot = serde_json::from_value::<PlanSnapshot>(context.args)
                     .map_err(|error| PluginError::Invoke(error.to_string()))?;
-                Ok(vec![PluginDirective::emit_runtime_events(vec![
-                    PluginRuntimeEvent::Custom {
+                Ok(vec![
+                    PluginDirective::emit_runtime_events(vec![PluginRuntimeEvent::Custom {
                         name: PLAN_EVENT.to_string(),
                         payload: serde_json::to_value(snapshot)
                             .map_err(|error| PluginError::Invoke(error.to_string()))?,
-                    },
-                ])])
+                    }])
+                    .into(),
+                ])
             })
         }));
         Ok(())
@@ -93,12 +95,13 @@ impl ToolProvider for UpdatePlanTool {
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
-        match serde_json::from_value::<PlanSnapshot>(call.args.clone()) {
-            Ok(snapshot) => ToolOutcome::ok(serde_json::json!({
-                "generation": snapshot.generation,
-            })),
-            Err(error) => ToolOutcome::err_fmt(format_args!("invalid plan: {error}")),
-        }
+        let snapshot = match typed_args::<PlanSnapshot>(call.args) {
+            Ok(snapshot) => snapshot,
+            Err(outcome) => return outcome,
+        };
+        typed_ok(serde_json::json!({
+            "generation": snapshot.generation,
+        }))
     }
 }
 
@@ -107,32 +110,27 @@ fn update_plan_definition() -> ToolDefinition {
         "tool:update_plan",
         "update_plan",
         "Publish or replace the current task plan.",
-        serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["plan"],
-            "properties": {
+        object_schema(
+            serde_json::json!({
                 "explanation": {"type": ["string", "null"]},
                 "generation": {"type": "integer", "minimum": 0},
                 "plan": {
                     "type": "array",
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["step", "status"],
-                        "properties": {
+                    "items": object_schema(
+                        serde_json::json!({
                             "step": {"type": "string"},
                             "status": {"enum": ["pending", "in_progress", "completed"]}
-                        }
-                    }
+                        }),
+                        &["step", "status"],
+                    )
                 }
-            }
-        }),
-        serde_json::json!({
-            "type": "object",
-            "required": ["generation"],
-            "properties": {"generation": {"type": "integer"}}
-        }),
+            }),
+            &["plan"],
+        ),
+        object_schema(
+            serde_json::json!({"generation": {"type": "integer"}}),
+            &["generation"],
+        ),
     )
-    .with_tool_binding(ToolBinding::new(["plan"], "update"))
+    .with_tool_binding(tool_binding(["plan"], "update", &[]))
 }

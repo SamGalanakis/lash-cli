@@ -211,6 +211,11 @@ fn json_finish_record(
         turn.outcome,
         TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
     ) && !cancelled;
+    let tool_calls = turn
+        .tool_calls
+        .iter()
+        .map(json_tool_call_record)
+        .collect::<Vec<_>>();
     let mut record = serde_json::json!({
         "type": "turn_finish",
         "stream_id": stream_id,
@@ -222,12 +227,20 @@ fn json_finish_record(
         "children_usage": turn.children_usage,
         "errors": turn.errors,
         "execution": turn.execution,
-        "tool_calls": turn.tool_calls,
+        "tool_calls": tool_calls,
     });
     if let Some(id) = request_id {
         record["id"] = id.clone();
     }
     record
+}
+
+fn json_tool_call_record(record: &lash::tools::ToolCallRecord) -> serde_json::Value {
+    let mut projected = serde_json::to_value(record).expect("tool call record serializes");
+    if let Some(payload) = projected.pointer_mut("/output/outcome/payload") {
+        *payload = record.output.value_for_projection();
+    }
+    projected
 }
 
 struct JsonRenderer {
@@ -348,12 +361,11 @@ async fn run_autonomous_turn(
     turn_input: TurnInput,
     output: &mut AutonomousOutput,
     stream_id: u64,
-    effect_host: std::sync::Arc<dyn lash::durability::EffectHost>,
 ) -> anyhow::Result<AutonomousTurnOutcome> {
     let observable = session.observe();
     let cursor = observable.current_observation().cursor;
     let mut observation = Some(observable.subscribe_and_recover(cursor));
-    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id, effect_host);
+    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id);
     #[cfg(unix)]
     {
         let cancel = cancel.clone();
@@ -440,14 +452,13 @@ async fn run_prepared_autonomous_turn(
     rlm_projected_bindings: Option<lash_protocol_rlm::RlmProjectedBindings>,
     stream_id: u64,
     output: &mut AutonomousOutput,
-    effect_host: std::sync::Arc<dyn lash::durability::EffectHost>,
 ) -> anyhow::Result<AutonomousTurnOutcome> {
     let prepared = PreparedTurn::prepare(prompt, Vec::new(), skills);
     let mut turn_input = make_turn_input(&prepared);
     if let Some(bindings) = rlm_projected_bindings {
         turn_input = lash_protocol_rlm::RlmTurnInputExt::rlm_project(turn_input, bindings)?;
     }
-    run_autonomous_turn(session, turn_input, output, stream_id, effect_host).await
+    run_autonomous_turn(session, turn_input, output, stream_id).await
 }
 
 async fn finish_autonomous_outcome(
@@ -488,10 +499,9 @@ pub(crate) async fn run_autonomous(
     persistence: AutonomousPersistenceContext,
     rlm_projected_bindings: Option<lash_protocol_rlm::RlmProjectedBindings>,
     mode: AutonomousMode,
-    effect_host: std::sync::Arc<dyn lash::durability::EffectHost>,
 ) -> anyhow::Result<()> {
     if mode == AutonomousMode::Rpc {
-        return run_rpc(session, skills, persistence, effect_host).await;
+        return run_rpc(session, skills, persistence).await;
     }
     let before_usage = session.usage_report();
     let mut output = match mode {
@@ -506,7 +516,6 @@ pub(crate) async fn run_autonomous(
         rlm_projected_bindings,
         1,
         &mut output,
-        effect_host,
     )
     .await?;
     let (done, cancelled) =
@@ -588,7 +597,6 @@ async fn run_rpc(
     session: LashSession,
     skills: SkillCatalog,
     persistence: AutonomousPersistenceContext,
-    effect_host: std::sync::Arc<dyn lash::durability::EffectHost>,
 ) -> anyhow::Result<()> {
     rpc_write(serde_json::json!({
         "type": "ready",
@@ -660,7 +668,6 @@ async fn run_rpc(
                     None,
                     stream_id,
                     &mut output,
-                    std::sync::Arc::clone(&effect_host),
                 )
                 .await?;
                 let (done, cancelled) =
@@ -691,11 +698,12 @@ async fn run_rpc(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash::TurnActivityId;
+    use lash::runtime::{SessionPolicy, SessionSnapshot};
+    use lash::tools::{ToolCallOutput, ToolCallRecord};
     use lash::turn::AssistantOutput;
+    use lash::usage::TokenUsage;
     use lash::{TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnReport, TurnStop};
-    use lash_core::{
-        SessionPolicy, SessionSnapshot, TokenUsage, ToolCallOutput, ToolCallRecord, TurnActivityId,
-    };
     use serde_json::json;
 
     fn completed_tool_activity() -> TurnActivity {
@@ -749,6 +757,7 @@ mod tests {
             },
             errors: Vec::new(),
             acceptance: None,
+            cancel_input_outcome: Default::default(),
         }
     }
 

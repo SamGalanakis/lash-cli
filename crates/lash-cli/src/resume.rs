@@ -1,7 +1,7 @@
 use lash::LashSession;
+use lash::messages::Message;
 use lash::provider::ProviderHandle;
-use lash_core::ToolState;
-use lash_core::session_model::Message;
+use lash::tools::ToolState;
 
 use crate::app::{App, UiTimelineItem};
 use crate::execution_settings::ExecutionMode;
@@ -29,13 +29,27 @@ pub async fn load_resumed_session(
         .map_err(|error| format!("Could not load session: {error}"))?;
     *history = loaded.messages;
     app.timeline = loaded.blocks;
-    app.session_id = loaded.session_id;
+    app.session_id = loaded.session_id.clone();
     app.session_name = loaded.session_name;
     app.usage.last_response_usage = loaded.last_token_usage;
     app.usage.last_prompt_usage = None;
     app.usage.token_usage = session.usage_report().usage.usage;
     app.plugin_mode_indicators = loaded.plugin_mode_indicators;
     app.replace_ui_activity_journal(loaded.ui_activity_journal);
+    match session_log::take_cancel_recovery(&loaded.session_id) {
+        Ok(texts) if !texts.is_empty() => {
+            app.timeline.push(UiTimelineItem::SystemMessage(format!(
+                "Inputs dropped by the last cancelled turn:\n{}",
+                texts.join("\n\n")
+            )));
+        }
+        Ok(_) => {}
+        Err(error) => {
+            app.timeline.push(UiTimelineItem::SystemMessage(format!(
+                "Could not read cancelled-input recovery: {error}"
+            )));
+        }
+    }
     app.timeline.push(UiTimelineItem::SystemMessage(format!(
         "Resumed: {}",
         loaded.filename

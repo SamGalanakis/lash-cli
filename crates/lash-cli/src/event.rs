@@ -1,6 +1,7 @@
 use crossterm::event::Event as TermEvent;
+use lash::TurnActivity;
+use lash::observe::SessionProcessEventKind;
 use lash::process::ProcessHandleView;
-use lash_core::{SessionProcessEventKind, TurnActivity};
 use lash_tui_extensions::TuiHostEffect;
 use tokio::sync::mpsc;
 

@@ -4,14 +4,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash::plugins::PluginFactory;
+use lash::plugins::SessionToolAccess;
+use lash::plugins::{PluginFactory, PluginSpec, StaticPluginFactory};
+use lash::prompt::PromptLayer;
 use lash::prompt::{
     PromptBuiltin, PromptContribution, PromptSlot, PromptTemplate, PromptTemplateEntry,
     PromptTemplateSection,
 };
+use lash::tools::ToolProvider;
 use lash::{ModelSpec, PluginStack, SessionSpec};
-use lash_core::plugin::{PluginSpec, StaticPluginFactory};
-use lash_core::{PromptLayer, SessionToolAccess, ToolProvider};
 use lash_llm_tools::LlmToolsPluginFactory;
 use lash_search_tools::grep_provider;
 use lash_standard_plugins::{

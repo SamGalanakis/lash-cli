@@ -1,11 +1,11 @@
 //! MCP discovery plugin.
 use std::sync::Arc;
 
-use lash_core::ToolProvider;
-use lash_core::plugin::{
+use lash::plugins::{
     PluginError, PluginFactory, PluginSessionContext, PluginSpec, SessionPlugin,
     StaticPluginFactory,
 };
+use lash::tools::ToolProvider;
 use lash_lashlang_runtime::catalogue_preview_contribution;
 
 use super::service::tool_discovery_provider_with_catalog;
@@ -41,16 +41,14 @@ impl ToolDiscoveryPluginFactory {
             .with_tool_provider(Arc::new(tool_discovery_provider_with_catalog(
                 extra_catalog.as_ref().clone(),
             )) as Arc<dyn ToolProvider>)
-            .with_prompt_contributor(Arc::new(
-                move |_ctx: lash_core::plugin::PromptHookContext| {
-                    let discovery_catalog = Arc::clone(&discovery_catalog);
-                    Box::pin(async move {
-                        Ok(catalogue_preview_contribution(discovery_catalog.as_ref())
-                            .into_iter()
-                            .collect())
-                    })
-                },
-            ));
+            .with_prompt_contributor(Arc::new(move |_ctx: lash::plugins::PromptHookContext| {
+                let discovery_catalog = Arc::clone(&discovery_catalog);
+                Box::pin(async move {
+                    Ok(catalogue_preview_contribution(discovery_catalog.as_ref())
+                        .into_iter()
+                        .collect())
+                })
+            }));
         Self {
             inner: StaticPluginFactory::new("tool_discovery", spec),
         }

@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 use chrono::Utc;
 
+use lash::messages::{Message, MessageOrigin, MessageRole, Part};
+use lash::plugins::PluginMessage;
 use lash::plugins::{
-    ContextError, PluginDirective, PluginError, PluginFactory, PluginRegistrar,
+    ContextError, EnqueueMessagesDirective, PluginError, PluginFactory, PluginRegistrar,
     PluginSessionContext, PreparedContext, SessionPlugin, TurnContextTransform,
     TurnTransformContext,
 };
-use lash_core::{Message, MessageRole, Part, PluginMessage, PromptContribution};
+use lash::prompt::PromptContribution;
 
 use crate::execution_settings::ExecutionMode;
 
@@ -117,9 +119,12 @@ impl SessionPlugin for PromptContextPlugin {
                 if instructions.trim().is_empty() {
                     return Ok(Vec::new());
                 }
-                Ok(vec![PluginDirective::EnqueueMessages {
-                    messages: vec![PluginMessage::text(MessageRole::System, instructions)],
-                }])
+                Ok(vec![
+                    EnqueueMessagesDirective {
+                        messages: vec![PluginMessage::text(MessageRole::System, instructions)],
+                    }
+                    .into(),
+                ])
             })
         }));
 
@@ -168,7 +173,7 @@ fn environment_tail_message(content: String) -> Message {
             None,
         )]
         .into(),
-        origin: Some(lash_core::MessageOrigin::Plugin {
+        origin: Some(MessageOrigin::Plugin {
             plugin_id: "prompt_context".to_string(),
             transient: true,
         }),

@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use lash_core::ModelSpec;
+use lash::ModelSpec;
 use reqwest as model_catalog_http;
 
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";

@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn consumes_current_trace_schema() {
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 9);
     }
     use lash_trace::{TraceContext, TraceLlmMessage, TraceRecord};
     use std::io::Write;

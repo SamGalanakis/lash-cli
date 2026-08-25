@@ -10,13 +10,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
-use lash::TurnBudget;
 use lash::persistence::{
-    ChronologicalEntry, RuntimePersistence, SessionMeta, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory,
+    ChronologicalEntry, SessionMeta, SessionReadView, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory,
 };
 use lash::preflight::{PreflightOptions, PreflightOutcome, probe_store};
-use lash::runtime::{SessionPolicy, SessionSnapshot};
+use lash::runtime::SessionPolicy;
 use lash_sqlite_store::{SqliteSessionStoreFactory, SqliteStorePreflight};
 
 pub mod html;
@@ -125,8 +124,8 @@ pub async fn load_session_from_paths(
     trace_path: &Path,
 ) -> std::result::Result<LoadedSession, LoadSessionError> {
     preflight_store(store_root).await?;
-    let store = open_session(store_root, session_id).await?;
-    let mut loaded = load_session(&*store, session_id).await?;
+    let read_view = open_session_read_only(store_root, session_id).await?;
+    let mut loaded = load_session(&read_view, session_id, None)?;
     loaded.trace_path = trace_path.to_path_buf();
     loaded.llm_prompts =
         trace::load_prompts_from_trace(trace_path).map_err(LoadSessionError::Trace)?;
@@ -179,54 +178,58 @@ pub(crate) async fn preflight_store(
     })
 }
 
-pub(crate) async fn open_session(
+pub(crate) async fn open_session_read_only(
     store_root: &Path,
     session_id: &str,
-) -> std::result::Result<std::sync::Arc<dyn RuntimePersistence>, LoadSessionError> {
+) -> std::result::Result<SessionReadView, LoadSessionError> {
+    let factory = SqliteSessionStoreFactory::new(store_root);
+    factory
+        .open_read_only(session_id)
+        .await
+        .map_err(LoadSessionError::Store)?
+        .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.to_string()))
+}
+
+/// Open the mutable persistence seam only for relation metadata that the
+/// read-only `SessionReadView` and catalog summary do not expose.
+pub(crate) async fn open_session_metadata(
+    store_root: &Path,
+    session_id: &str,
+) -> std::result::Result<SessionMeta, LoadSessionError> {
     let factory = SqliteSessionStoreFactory::new(store_root);
     let request = SessionStoreCreateRequest {
         session_id: session_id.to_string(),
         relation: SessionRelation::Root,
-        policy: SessionPolicy::new(TurnBudget::Unbounded),
+        policy: SessionPolicy::new(lash::TurnBudget::Unbounded),
     };
-    factory
+    let store = factory
         .open_existing_store(&request)
         .await
         .map_err(LoadSessionError::OpenStore)?
+        .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.to_string()))?;
+    store
+        .load_session_meta()
+        .await
+        .map_err(LoadSessionError::Store)?
         .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.to_string()))
 }
 
-pub(crate) async fn load_session(
-    store: &dyn RuntimePersistence,
+pub(crate) fn load_session(
+    read_view: &SessionReadView,
     session_id: &str,
+    meta: Option<SessionMeta>,
 ) -> std::result::Result<LoadedSession, LoadSessionError> {
-    let meta = store
-        .load_session_meta()
-        .await
-        .map_err(LoadSessionError::Store)?;
-    let persisted = store
-        .load_session()
-        .await
-        .map_err(LoadSessionError::Store)?
-        .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.to_string()))?;
-    let (model_id, context_window_tokens) = {
-        let model = &persisted.config.model;
-        (
-            Some(model.id.clone()),
-            Some(model.context_window_tokens() as u64),
-        )
-    };
-    let mut state = SessionSnapshot::new(SessionPolicy::new(TurnBudget::Unbounded));
-    state.session_id = session_id.to_string();
-    state.current_frame_node_id = persisted.current_frame_node_id;
-    state.session_graph = persisted.graph;
-    let chronological = state.read_view().chronological_projection().into_entries();
+    if read_view.session_id() != session_id {
+        return Err(LoadSessionError::SessionNotFound(session_id.to_string()));
+    }
+    let model = &read_view.policy().model;
+    let chronological = read_view.chronological_projection().into_entries();
     Ok(LoadedSession {
         meta,
         chronological,
         trace_path: PathBuf::new(),
-        model_id,
-        context_window_tokens,
+        model_id: Some(model.id.clone()),
+        context_window_tokens: Some(model.context_window_tokens() as u64),
         llm_prompts: Vec::new(),
     })
 }
@@ -302,7 +305,7 @@ mod tests {
 
     use lash::direct::LlmOutputPart;
     use lash::provider::LlmResponse;
-    use lash::{LashCore, ModelSpec, TurnInput};
+    use lash::{LashCore, ModelSpec, TurnBudget, TurnInput};
 
     use super::*;
 
@@ -451,9 +454,9 @@ mod tests {
                 assert_eq!(stamps.len(), 1);
                 assert_eq!(stamps[0].database, "durable core");
                 assert_eq!(stamps[0].found, 11);
-                assert_eq!(stamps[0].expected, 38);
+                assert_eq!(stamps[0].expected, 41);
                 assert!(message.contains("11"));
-                assert!(message.contains("38"));
+                assert!(message.contains("41"));
             }
             other => panic!("expected typed schema refusal, got {other}"),
         }

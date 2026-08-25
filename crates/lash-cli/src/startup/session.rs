@@ -6,9 +6,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use lash::durability::EffectHost;
 use lash::persistence::{AttachmentStore, LeaseOwnerIdentity, ProcessExecutionEnvStore};
+use lash::prompt::PromptLayer;
 use lash::rlm::{RLM_PROTOCOL_PLUGIN_ID, RlmCreateExtras, RlmSessionExt};
+use lash::runtime::SessionPolicy;
 use lash::{LashCore, LashSession, PluginStack, PromptLayerSink, SessionSpec};
-use lash_core::{PromptLayer, SessionPolicy};
 
 use crate::execution_settings::{
     ExecutionMode, RlmDialect, RlmTerminationMode, default_rlm_termination_for_mode,
@@ -24,9 +25,7 @@ impl SessionBootstrapSource {
     pub(crate) async fn from_resume_arg(resume: Option<String>) -> Self {
         match resume {
             Some(identifier) => Self::Resume(
-                session_log::filename_for_session_identifier(&identifier)
-                    .await
-                    .unwrap_or(identifier),
+                session_log::roster_session_id_for_display_name(&identifier).unwrap_or(identifier),
             ),
             None => Self::Fresh,
         }
@@ -85,7 +84,6 @@ pub(crate) struct CliSessionOpener {
     trace_jsonl_path: Option<PathBuf>,
     trace_level: lash::tracing::TraceLevel,
     opened_cores: Arc<tokio::sync::Mutex<Vec<LashCore>>>,
-    active_effect_host: Arc<std::sync::RwLock<Option<Arc<dyn EffectHost>>>>,
 }
 
 impl SessionBootstrap {
@@ -104,7 +102,6 @@ impl SessionBootstrap {
             {
                 anyhow::bail!(session_log::incompatible_session_message(&old_path).await);
             }
-            anyhow::bail!("Could not resolve session `{session_id}`");
         }
         let session_name = roster
             .as_ref()
@@ -174,16 +171,7 @@ impl CliSessionOpener {
             trace_jsonl_path,
             trace_level,
             opened_cores: Arc::new(tokio::sync::Mutex::new(Vec::new())),
-            active_effect_host: Arc::new(std::sync::RwLock::new(None)),
         }
-    }
-
-    pub(crate) fn active_effect_host(&self) -> Arc<dyn EffectHost> {
-        self.active_effect_host
-            .read()
-            .expect("active effect-host lock poisoned")
-            .clone()
-            .expect("a Lash session always has an active effect host")
     }
 
     pub(crate) async fn shutdown(&self) -> Result<()> {
@@ -195,14 +183,53 @@ impl CliSessionOpener {
         Ok(())
     }
 
-    pub(crate) async fn fork_at(&self, node_id: &str, child_session_id: &str) -> Result<()> {
-        let core = self
-            .opened_cores
+    async fn active_core(&self) -> Result<LashCore> {
+        self.opened_cores
             .lock()
             .await
             .last()
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("no Lash core is open"))?;
+            .ok_or_else(|| anyhow::anyhow!("no Lash core is open"))
+    }
+
+    pub(crate) async fn list_recent_sessions(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<session_log::SessionInfo>> {
+        let core = self.active_core().await?;
+        session_log::list_recent_sessions(&core, limit).await
+    }
+
+    pub(crate) async fn cancel_active_turn(
+        &self,
+        session_id: &str,
+        stream_id: u64,
+        process_cancel: Option<lash::CancellationToken>,
+    ) -> Result<lash::TurnCancelInputOutcome> {
+        let driver = self.active_core().await?.turn_work_driver();
+        let address = lash::TurnAddress::new(session_id, format!("cli-turn:{stream_id}"));
+        let request = lash::TurnCancelRequest::new(
+            address.clone(),
+            format!("cli-cancel:{}", uuid::Uuid::new_v4()),
+            Some("interactive-user".to_string()),
+        )
+        .with_reason("operator requested turn cancellation")
+        .undelivered(lash::TurnCancelDisposition::Drop);
+        let requested = driver.request_cancel(request.clone()).await;
+        if let Some(token) = process_cancel {
+            token.cancel();
+        }
+        requested?;
+        driver.await_terminal(&address).await?;
+        let settled = driver.request_cancel(request).await?;
+        Ok(settled
+            .record
+            .and_then(|record| record.outcome)
+            .unwrap_or_default())
+    }
+
+    pub(crate) async fn fork_at(&self, node_id: &str, child_session_id: &str) -> Result<()> {
+        let core = self.active_core().await?;
         core.pin(node_id).await?;
         core.fork_at(node_id, child_session_id).await?;
         Ok(())
@@ -210,7 +237,7 @@ impl CliSessionOpener {
 
     pub(crate) async fn open_prepared(
         &self,
-        bootstrap: SessionBootstrap,
+        mut bootstrap: SessionBootstrap,
         fallback_policy: SessionPolicy,
         host_config: CliSessionHostConfig,
     ) -> Result<OpenedCliLashSession> {
@@ -277,11 +304,17 @@ impl CliSessionOpener {
                 uuid::Uuid::new_v4().to_string(),
             ))
             .context("build Lash core")?;
-        if bootstrap.resumed && !core.session_exists(&bootstrap.session_id).await? {
-            anyhow::bail!(
-                "Session `{}` is present in the host roster but absent from the Lash catalog",
-                bootstrap.session_id
-            );
+        if bootstrap.resumed {
+            let requested = bootstrap.session_id.clone();
+            bootstrap.session_id = session_log::resolve_session_identifier(&core, &requested)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Could not resolve session `{requested}`"))?;
+            let roster = session_log::load_roster_entry(&bootstrap.session_id).ok();
+            bootstrap.session_name = roster
+                .as_ref()
+                .map(|entry| entry.session_name.clone())
+                .unwrap_or_else(|| session_log::fallback_session_label(&bootstrap.session_id));
+            bootstrap.host_config = session_log::load_host_config(&bootstrap.session_id).ok();
         }
 
         let session_spec = SessionSpec::new()
@@ -329,10 +362,6 @@ impl CliSessionOpener {
                 Some(bootstrap.session_id.clone()),
             )
             .await?;
-        *self
-            .active_effect_host
-            .write()
-            .expect("active effect-host lock poisoned") = Some(effect_host);
         self.opened_cores.lock().await.push(core.clone());
         Ok(OpenedCliLashSession {
             bootstrap,

@@ -22,11 +22,17 @@ durable formats: {}",
 }
 
 fn durable_formats_text() -> String {
-    lash::formats::durable_formats()
-        .iter()
-        .map(|entry| format!("{}={}", entry.format.name(), entry.version))
-        .collect::<Vec<_>>()
-        .join(", ")
+    let mut formats = vec![
+        "session schema=41".to_string(),
+        format!("trace schema={}", lash_trace::TRACE_SCHEMA_VERSION),
+        format!("remote protocol={}", lash::remote::REMOTE_PROTOCOL_VERSION),
+    ];
+    formats.extend(
+        lash::formats::durable_formats()
+            .iter()
+            .map(|entry| format!("{}={}", entry.format.name(), entry.version)),
+    );
+    formats.join(", ")
 }
 
 pub(crate) fn info_text_unconfigured(execution_mode: &ExecutionMode, cwd: &str) -> String {
@@ -303,8 +309,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trace_schema_is_pinned_to_eight() {
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 8);
+    fn durable_format_versions_match_the_adopted_lash_pin() {
+        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 9);
+        assert_eq!(lash::remote::REMOTE_PROTOCOL_VERSION, 46);
+        assert!(
+            durable_formats_text()
+                .starts_with("session schema=41, trace schema=9, remote protocol=46")
+        );
     }
     use crate::keybindings::ShortcutHelpRow;
 

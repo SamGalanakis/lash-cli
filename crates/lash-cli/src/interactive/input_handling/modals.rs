@@ -4,7 +4,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use lash::LashSession;
-use lash_core::runtime::ExecutionScope;
+use lash::runtime::ExecutionScope;
 
 use crate::app::{App, UiTimelineItem};
 use crate::config::{LashConfig, ThemeName};
@@ -175,6 +175,15 @@ pub(super) async fn cancel_selected_process(app: &mut App, runtime: &Option<Lash
                 }
             }
         }
+        Err(lash::EmbedError::Plugin(lash::plugins::PluginError::ProcessUnknown {
+            process_id,
+        })) => push_system_message(app, format!("Process `{process_id}` no longer exists.")),
+        Err(lash::EmbedError::Plugin(lash::plugins::PluginError::ProcessNotVisible {
+            process_id,
+        })) => push_system_message(
+            app,
+            format!("Process `{process_id}` is not visible in this session."),
+        ),
         Err(err) => push_system_message(app, format!("Failed to cancel process: {err}")),
     }
 }

@@ -49,28 +49,27 @@ uuid = "1"
 
 # The CLI tracks one reviewed Lash release. Dependency updates are explicit,
 # testable compatibility changes rather than an implicit lockstep workspace.
-lash = { package = "lash-runtime", git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-core = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-lashlang-runtime = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-llm-tools = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-plugin-mcp = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
+lash = { package = "lash-runtime", git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-core = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-lashlang-runtime = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-llm-tools = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-plugin-mcp = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
 # lash-plugin-plan-mode removed upstream
-# lash-plugin-plan-mode = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-plugin-process-controls = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-protocol-rlm = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-protocol-standard = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-provider-anthropic = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-provider-auth = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-provider-google = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-provider-openai = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-rlm-types = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-sqlite-store = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-standard-plugins = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-subagents = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-tool-support = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-trace = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lash-typescript = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
-lashlang = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }
+lash-plugin-process-controls = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-protocol-rlm = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-protocol-standard = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-provider-anthropic = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-provider-auth = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-provider-google = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-provider-openai = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-rlm-types = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-sqlite-store = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-standard-plugins = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-subagents = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-tool-support = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-trace = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lash-typescript = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
+lashlang = { git = "https://github.com/Ascending-AI/lash.git", rev = "372a95fe9" }
 
 lash-autoresearch = { path = "crates/lash-autoresearch" }
 lash-cli-perf = { path = "crates/lash-cli-perf" }
@@ -83,7 +82,3 @@ lash-tui-extensions = { path = "crates/lash-tui-extensions" }
 [profile.release]
 lto = "thin"
 strip = true
-
-# Lash main pins a fuel-metered fork of regress via [patch]; downstream hosts must mirror it.
-[patch.crates-io]
-regress = { git = "https://github.com/Ascending-AI/lash.git", rev = "bc28978d2" }

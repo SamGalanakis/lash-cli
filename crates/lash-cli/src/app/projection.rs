@@ -420,7 +420,7 @@ fn truncate_chars(value: String, limit: usize) -> String {
 }
 
 pub(crate) fn timeline_from_read_view(
-    read_view: &lash_core::SessionReadView,
+    read_view: &lash::persistence::SessionReadView,
     ui_state: &UiProjectionState,
 ) -> UiTimeline {
     let projection = read_view.chronological_projection();
@@ -674,7 +674,7 @@ fn append_transcript_items(
 }
 
 fn is_internal_rlm_message(message: &Message) -> bool {
-    let Some(lash_core::MessageOrigin::Plugin { plugin_id, .. }) = &message.origin else {
+    let Some(lash::messages::MessageOrigin::Plugin { plugin_id, .. }) = &message.origin else {
         return false;
     };
     if plugin_id != "rlm_protocol" {
@@ -694,7 +694,7 @@ fn is_internal_rlm_message(message: &Message) -> bool {
 
 fn append_tool_result_items(
     timeline: &mut UiTimeline,
-    part: &lash_core::Part,
+    part: &lash::messages::Part,
     tool_calls: &HashMap<&str, ToolCallRecord>,
     activity_state: &mut ActivityState,
 ) {

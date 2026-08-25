@@ -90,11 +90,8 @@ pub(super) async fn handle_global_shortcut_key(
             app.note_manual_interrupt_requested();
             app.timeline
                 .push_system_message_if_new(crate::util::manual_interrupt_message().to_string());
-            retire_pending_active_turn_inputs(ctx.runtime.as_ref(), *ctx.active_stream_id).await;
-            request_exact_turn_cancel(ctx.runtime.as_ref(), *ctx.active_stream_id).await;
-            if let Some(token) = cancel_token.take() {
-                token.cancel();
-            }
+            let process_cancel = cancel_token.take();
+            cancel_active_turn_and_restore(ctx, process_cancel).await;
             return Ok(Some(false));
         }
         if !app.input().is_empty() || app.has_pending_input_payload() {
@@ -201,12 +198,8 @@ pub(super) async fn handle_global_shortcut_key(
                 app.timeline.push_system_message_if_new(
                     crate::util::manual_interrupt_message().to_string(),
                 );
-                retire_pending_active_turn_inputs(ctx.runtime.as_ref(), *ctx.active_stream_id)
-                    .await;
-                request_exact_turn_cancel(ctx.runtime.as_ref(), *ctx.active_stream_id).await;
-                if let Some(token) = cancel_token.take() {
-                    token.cancel();
-                }
+                let process_cancel = cancel_token.take();
+                cancel_active_turn_and_restore(ctx, process_cancel).await;
             }
             // When idle with no dialog: no-op
         }
@@ -216,55 +209,67 @@ pub(super) async fn handle_global_shortcut_key(
     Ok(None)
 }
 
-async fn retire_pending_active_turn_inputs(session: Option<&lash::LashSession>, stream_id: u64) {
-    let Some(session) = session else {
+async fn cancel_active_turn_and_restore(
+    ctx: &mut SessionCtx<'_>,
+    process_cancel: Option<lash::CancellationToken>,
+) {
+    let Some(session_id) = ctx.runtime.as_ref().map(lash::LashSession::session_id) else {
+        if let Some(token) = process_cancel {
+            token.cancel();
+        }
         return;
     };
-    let turn_id = format!("cli-turn:{stream_id}");
-    let pending = match session.pending_turn_inputs().await {
-        Ok(pending) => pending,
-        Err(error) => {
-            tracing::warn!(%turn_id, %error, "failed to inspect active-turn inputs before cancellation");
-            Vec::new()
-        }
-    };
-    let candidates = pending
-        .into_iter()
-        .filter(|input| {
-            input.ingress.active_turn_id() == Some(turn_id.as_str())
-                && !matches!(
-                    input.state,
-                    lash_core::TurnInputState::Cancelled | lash_core::TurnInputState::Completed
-                )
-        })
-        .collect::<Vec<_>>();
-    let targets = candidates
-        .iter()
-        .map(|input| lash::PendingTurnInputCancelTarget::input_id(input.input_id.clone()))
-        .collect::<Vec<_>>();
-    if !targets.is_empty()
-        && let Err(error) = session.cancel_pending_turn_inputs(targets).await
+    let stream_id = *ctx.active_stream_id;
+    match ctx
+        .runtime_factory
+        .cancel_active_turn(&session_id, stream_id, process_cancel)
+        .await
     {
-        tracing::warn!(%turn_id, %error, "failed to retire active-turn inputs before cancellation");
+        Ok(outcome) => restore_cancelled_input_texts(ctx.app, &session_id, &outcome),
+        Err(error) => {
+            tracing::warn!(stream_id, %error, "exact turn cancellation request failed");
+        }
     }
 }
 
-async fn request_exact_turn_cancel(session: Option<&lash::LashSession>, stream_id: u64) {
-    let Some(session) = session else {
+fn cancelled_input_texts(outcome: &lash::TurnCancelInputOutcome) -> Vec<String> {
+    outcome
+        .affected_inputs
+        .iter()
+        .filter(|input| matches!(input.disposition, lash::TurnCancelDisposition::Drop))
+        .map(|input| crate::app::turn_input_display_text(&input.payload))
+        .filter(|text| !text.trim().is_empty())
+        .collect()
+}
+
+fn prepend_cancelled_input_texts(current: &str, texts: &[String]) -> Option<String> {
+    if texts.is_empty() {
+        return None;
+    }
+    let restored = texts.join("\n\n");
+    Some(if current.trim().is_empty() {
+        restored
+    } else {
+        format!("{restored}\n\n{current}")
+    })
+}
+
+fn restore_cancelled_input_texts(
+    app: &mut App,
+    session_id: &str,
+    outcome: &lash::TurnCancelInputOutcome,
+) {
+    let texts = cancelled_input_texts(outcome);
+    let Some(restored) = prepend_cancelled_input_texts(app.input(), &texts) else {
         return;
     };
-    let turn_id = format!("cli-turn:{stream_id}");
-    let request_id = format!("cli-cancel:{}", uuid::Uuid::new_v4());
-    if let Err(error) = session
-        .request_turn_cancel(
-            &turn_id,
-            request_id,
-            Some("interactive-user".to_string()),
-            Some("operator requested turn cancellation".to_string()),
-        )
-        .await
-    {
-        tracing::warn!(%turn_id, %error, "exact turn cancellation request failed");
+    if let Err(error) = crate::session_log::save_cancel_recovery(session_id, &texts) {
+        tracing::warn!(%error, "failed to save cancelled-input recovery sidecar");
+    }
+    app.set_input(restored);
+    app.update_suggestions();
+    if let Err(error) = crate::session_log::clear_cancel_recovery(session_id) {
+        tracing::warn!(%error, "failed to clear cancelled-input recovery sidecar");
     }
 }
 
@@ -535,7 +540,7 @@ fn paste_clipboard_image(
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::is_command_palette_shortcut;
+    use super::{is_command_palette_shortcut, prepend_cancelled_input_texts};
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent {
@@ -568,5 +573,24 @@ mod tests {
             KeyCode::Char('p'),
             KeyModifiers::NONE
         )));
+    }
+
+    #[test]
+    fn cancelled_inputs_restore_ahead_of_the_current_draft() {
+        let texts = vec!["first steer".to_string(), "second steer".to_string()];
+        assert_eq!(
+            prepend_cancelled_input_texts("current draft", &texts).as_deref(),
+            Some("first steer\n\nsecond steer\n\ncurrent draft")
+        );
+    }
+
+    #[test]
+    fn cancelled_inputs_restore_without_trailing_separator_for_empty_draft() {
+        let texts = vec!["steer".to_string()];
+        assert_eq!(
+            prepend_cancelled_input_texts("", &texts).as_deref(),
+            Some("steer")
+        );
+        assert_eq!(prepend_cancelled_input_texts("draft", &[]), None);
     }
 }

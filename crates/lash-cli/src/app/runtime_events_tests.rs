@@ -1,10 +1,12 @@
 use super::*;
 use crate::activity::ActivityStatus;
+use lash::TurnInputApplication;
+use lash::messages::MessageRole;
+use lash::persistence::{CheckpointKind, TurnInputIngress};
+use lash::plugins::{PluginMessage, PluginRuntimeEvent};
+use lash::tools::{ToolCallOutput, ToolFailure, ToolFailureClass};
+use lash::usage::TokenUsage;
 use lash::{TurnActivity, TurnActivityId, TurnEvent};
-use lash_core::{
-    CheckpointKind, MessageRole, PluginMessage, PluginRuntimeEvent, TokenUsage, ToolCallOutput,
-    ToolFailure, ToolFailureClass, TurnInputApplication, TurnInputIngress,
-};
 use serde_json::json;
 
 fn app() -> App {
@@ -288,7 +290,7 @@ fn queued_input_accepted_adds_user_history_exactly_once() {
         applications: vec![TurnInputApplication {
             input_id: input_id.clone(),
             source_key: None,
-            turn_id: lash_core::TurnId::from("turn-1"),
+            turn_id: lash::persistence::TurnId::from("turn-1"),
             committed_message_id: "message-1".into(),
             checkpoint: Some(CheckpointKind::AfterWork),
         }],

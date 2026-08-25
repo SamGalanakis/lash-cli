@@ -134,7 +134,7 @@ pub(crate) fn llm_rerank_request(
     DirectRequest {
         model,
         model_variant: crate::model_selection::reasoning_selection_from_variant(model_variant),
-        model_capability: lash_core::ModelCapability::default(),
+        model_capability: lash::provider::ModelCapability::default(),
         messages: vec![
             DirectMessage {
                 role: DirectRole::System,
@@ -151,7 +151,7 @@ pub(crate) fn llm_rerank_request(
         attachments: Vec::new(),
         output: DirectOutputSpec::JsonSchema(schema),
         stream_events: None,
-        generation: lash_core::GenerationOptions::default(),
+        generation: lash::direct::GenerationOptions::default(),
         session_id: None,
         caused_by: None,
         replay: None,

@@ -1,9 +1,10 @@
 use std::time::Instant;
 
-use lash_core::{
-    Message, MessageRole, Part, PartKind, SessionReadView, SessionSnapshot, ToolCallOutput,
-    ToolCancellation, ToolFailure, ToolFailureClass, ToolOutcome, TurnActivity, TurnEvent,
-};
+use lash::messages::{Message, MessageRole, Part, PartKind};
+use lash::persistence::SessionReadView;
+use lash::runtime::SessionSnapshot;
+use lash::tools::{ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, ToolOutcome};
+use lash::{TurnActivity, TurnEvent};
 use serde_json::json;
 
 use crate::app::{
@@ -131,25 +132,25 @@ pub(crate) fn run_turn_interrupt_steer_reconciliation_once(
         1,
         "ui-ti-active-accepted",
         &active,
-        lash_core::TurnInputIngress::active_turn(
+        lash::persistence::TurnInputIngress::active_turn(
             "ui-active-turn",
-            lash_core::TurnInputCheckpointBoundary::AfterWork,
+            lash::persistence::TurnInputCheckpointBoundary::AfterWork,
         ),
     );
     let mut deferred_pending = pending_turn_input_for_ui_perf(
         2,
         "ui-ti-active-deferred",
         &deferred,
-        lash_core::TurnInputIngress::active_turn(
+        lash::persistence::TurnInputIngress::active_turn(
             "ui-active-turn",
-            lash_core::TurnInputCheckpointBoundary::BeforeCompletion,
+            lash::persistence::TurnInputCheckpointBoundary::BeforeCompletion,
         ),
     );
     let queued_pending = pending_turn_input_for_ui_perf(
         3,
         "ui-ti-next",
         &queued,
-        lash_core::TurnInputIngress::NextTurn,
+        lash::persistence::TurnInputIngress::NextTurn,
     );
     let active_input_id = active_pending.input_id.clone();
     app.set_pending_turn_input_snapshot(vec![
@@ -196,8 +197,8 @@ pub(crate) fn run_turn_interrupt_steer_reconciliation_once(
         &ui_state,
         crate::util::manual_interrupt_message(),
     );
-    deferred_pending.ingress = lash_core::TurnInputIngress::NextTurn;
-    deferred_pending.state = lash_core::TurnInputState::DeferredNextTurn;
+    deferred_pending.ingress = lash::persistence::TurnInputIngress::NextTurn;
+    deferred_pending.state = lash::persistence::TurnInputState::DeferredNextTurn;
     app.set_pending_turn_input_snapshot(vec![deferred_pending.clone(), queued_pending.clone()]);
     result.sample("interrupt_reconciliation_ms", elapsed_ms(interrupt_started));
 
@@ -247,13 +248,17 @@ fn pending_turn_input_for_ui_perf(
     enqueue_seq: u64,
     input_id: &str,
     turn: &PreparedTurn,
-    ingress: lash_core::TurnInputIngress,
-) -> lash_core::PendingTurnInput {
+    ingress: lash::persistence::TurnInputIngress,
+) -> lash::PendingTurnInput {
     let state = match ingress {
-        lash_core::TurnInputIngress::ActiveTurn { .. } => lash_core::TurnInputState::PendingActive,
-        lash_core::TurnInputIngress::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
+        lash::persistence::TurnInputIngress::ActiveTurn { .. } => {
+            lash::persistence::TurnInputState::PendingActive
+        }
+        lash::persistence::TurnInputIngress::NextTurn => {
+            lash::persistence::TurnInputState::DeferredNextTurn
+        }
     };
-    lash_core::PendingTurnInput {
+    lash::PendingTurnInput {
         input_id: input_id.to_string(),
         session_id: "ui-interrupt-session".to_string(),
         enqueue_seq,
@@ -266,7 +271,7 @@ fn pending_turn_input_for_ui_perf(
 }
 
 pub(crate) fn build_projection_read_view(turn_count: usize) -> SessionReadView {
-    let mut graph = lash_core::SessionGraph::default();
+    let mut graph = lash::persistence::SessionGraph::default();
 
     for turn in 0..turn_count {
         let user = text_message(
@@ -305,7 +310,7 @@ pub(crate) fn build_projection_read_view(turn_count: usize) -> SessionReadView {
 
     let state = SessionSnapshot {
         session_graph: graph,
-        ..SessionSnapshot::new(lash_core::SessionPolicy::new(
+        ..SessionSnapshot::new(lash::runtime::SessionPolicy::new(
             crate::host_policy::turn_budget(),
         ))
     };

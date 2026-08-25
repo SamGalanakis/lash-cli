@@ -2,11 +2,11 @@ use lash::CancellationToken;
 use lash::LashSession;
 use lash::TurnExecutionMetrics;
 use lash::TurnInput;
+use lash::persistence::RuntimeSessionState;
+use lash::turn::AssistantOutput;
 use lash::turn::TurnIssue;
-use lash_core::TokenUsage;
-use lash_core::facade_support::{AssistantOutput, OutputState};
-use lash_core::runtime::RuntimeSessionState;
-use std::sync::Arc;
+use lash::usage::TokenUsage;
+use lash_core::facade_support::OutputState;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -30,7 +30,6 @@ pub(crate) fn spawn_session_turn(
     session: LashSession,
     turn_input: TurnInput,
     stream_id: u64,
-    effect_host: Arc<dyn lash::durability::EffectHost>,
 ) -> (CancellationToken, oneshot::Receiver<RuntimeRunResult>) {
     let (return_tx, return_rx) = oneshot::channel();
     let cancel = CancellationToken::new();
@@ -42,16 +41,11 @@ pub(crate) fn spawn_session_turn(
         tracing::debug!(stream_id, "runtime turn task spawned");
         let result = match async {
             let turn_id = format!("cli-turn:{stream_id}");
-            let scope = lash::runtime::ExecutionScope::turn(task_session.session_id(), &turn_id);
-            let scoped_effects = effect_host
-                .scoped_static(scope)?
-                .expect("the SQLite CLI effect host always provides a static scope");
             task_session
                 .turn(turn_input)
                 .turn_id(turn_id)
                 .cancel(task_cancel)
-                .advanced()
-                .stream_to_with_scope(&lash::runtime::NoopTurnActivitySink, scoped_effects)
+                .stream_to(&lash::runtime::NoopTurnActivitySink)
                 .await
         }
         .await
@@ -76,7 +70,6 @@ pub(crate) fn spawn_session_turn(
 pub(crate) fn spawn_session_queued_turn(
     session: LashSession,
     stream_id: u64,
-    effect_host: Arc<dyn lash::durability::EffectHost>,
 ) -> (CancellationToken, oneshot::Receiver<RuntimeRunResult>) {
     let (return_tx, return_rx) = oneshot::channel();
     let cancel = CancellationToken::new();
@@ -88,17 +81,11 @@ pub(crate) fn spawn_session_queued_turn(
         tracing::debug!(stream_id, "queued runtime turn task spawned");
         let result = match async {
             let drain_id = format!("cli-queue-drain:{stream_id}");
-            let scope =
-                lash::runtime::ExecutionScope::queue_drain(task_session.session_id(), &drain_id);
-            let scoped_effects = effect_host
-                .scoped_static(scope)?
-                .expect("the SQLite CLI effect host always provides a static scope");
             task_session
                 .queued_turn()
                 .drain_id(drain_id)
                 .cancel(task_cancel)
-                .advanced()
-                .stream_to_with_scope(&lash::runtime::NoopTurnActivitySink, scoped_effects)
+                .stream_to(&lash::runtime::NoopTurnActivitySink)
                 .await
         }
         .await
@@ -187,5 +174,6 @@ async fn runtime_error_turn_result(session: &LashSession, message: String) -> la
             provider_failure_kind: None,
         }],
         acceptance: None,
+        cancel_input_outcome: Default::default(),
     }
 }

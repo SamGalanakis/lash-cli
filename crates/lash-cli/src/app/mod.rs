@@ -11,12 +11,15 @@ mod view;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use lash::PendingTurnInput;
+use lash::TurnActivityId;
+use lash::messages::{Message, MessageRole, PartKind};
+use lash::observe::SessionProcessEventKind;
+use lash::plugins::PluginMessage;
 use lash::process::{ProcessHandleView, ProcessStatus};
-use lash_core::runtime::PendingTurnInput;
-use lash_core::{
-    Message, MessageRole, PartKind, PluginMessage, PromptUsage, SessionProcessEventKind,
-    TokenUsage, ToolCallRecord, TurnActivityId,
-};
+use lash::runtime::PromptUsage;
+use lash::tools::ToolCallRecord;
+use lash::usage::TokenUsage;
 use lash_tui::{Line, Rect};
 use lash_tui_extensions::TuiExtensions;
 
@@ -37,6 +40,7 @@ pub(crate) use self::projection::{
     UiActivityJournal, UiActivityRecord, UiTimeline, UiTimelineItem, preview_text_lines,
     smart_truncate_preview_line, timeline_from_read_view,
 };
+pub(crate) use self::queues::turn_input_display_text;
 
 fn user_turn_start_indices(blocks: &[UiTimelineItem]) -> Vec<usize> {
     blocks
@@ -559,9 +563,6 @@ pub struct Queues {
     /// admission owns ordering and lifecycle; this cache only preserves draft
     /// text, images, and paste placeholders the runtime cannot reconstruct.
     pub draft_presentations: HashMap<String, PreparedTurn>,
-    /// Active-turn drafts retained until the turn settles so a manual
-    /// interruption can preserve operator input at the next-turn boundary.
-    pub active_turn_drafts: Vec<PreparedTurn>,
     /// Latest durable pending-turn-input snapshot loaded from `LashSession`.
     pub pending_turn_input_snapshot: Vec<PendingTurnInput>,
     /// Input ids that have already been claimed for dispatch locally but may
@@ -749,13 +750,12 @@ impl App {
         }
     }
 
-    pub fn finish_turn_from_read_view(&mut self, read_view: &lash_core::SessionReadView) {
+    pub fn finish_turn_from_read_view(&mut self, read_view: &lash::persistence::SessionReadView) {
         let current_turn_starts = user_turn_start_indices(self.timeline.items());
         let current_turn_start = current_turn_starts.last().copied();
         let local_system_messages = self.local_system_messages();
 
         self.stop_turn();
-        self.clear_active_turn_drafts();
         let ui_state = UiProjectionState::from_app(self);
         let projected_timeline = timeline_from_read_view(read_view, &ui_state);
         let projected_turn_starts = user_turn_start_indices(projected_timeline.items());
@@ -788,13 +788,12 @@ impl App {
 
     pub fn finish_interrupted_turn_from_read_view(
         &mut self,
-        read_view: &lash_core::SessionReadView,
+        read_view: &lash::persistence::SessionReadView,
         ui_state: &UiProjectionState,
         status_message: impl Into<String>,
     ) {
         let local_system_messages = self.local_system_messages();
         self.stop_turn();
-        self.clear_active_turn_drafts();
         let mut projected_timeline = timeline_from_read_view(read_view, ui_state);
         Self::append_missing_system_messages(&mut projected_timeline, local_system_messages);
         projected_timeline.push_system_message_if_new(status_message.into());

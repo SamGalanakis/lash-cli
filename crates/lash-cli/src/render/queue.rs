@@ -19,7 +19,7 @@ fn queue_preview_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         let target = if app.turn_active()
             && matches!(
                 pending.ingress,
-                lash_core::TurnInputIngress::ActiveTurn { .. }
+                lash::persistence::TurnInputIngress::ActiveTurn { .. }
             ) {
             &mut after_current_step_previews
         } else {

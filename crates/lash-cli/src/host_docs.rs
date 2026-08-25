@@ -3,8 +3,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash::plugins::{PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin};
-use lash_core::{PluginError, PromptContribution};
+use lash::plugins::{
+    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
+};
+use lash::prompt::PromptContribution;
 
 const DOCS_DIR: &str = "docs";
 const HOST_DOCS_DIR: &str = "lash-cli";

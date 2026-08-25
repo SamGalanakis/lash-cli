@@ -107,15 +107,18 @@ pub(super) async fn handle_model(
             return Ok(false);
         }
     };
-    if let Some(rt) = runtime.as_mut() {
-        let _ = rt
+    if let Some(rt) = runtime.as_mut()
+        && let Err(error) = rt
             .admin()
             .config()
             .update(SessionConfigPatch {
                 model: Some(model_spec),
                 ..SessionConfigPatch::default()
             })
-            .await;
+            .await
+    {
+        push_system_message(app, format!("Model update failed to settle: {error}"));
+        return Ok(false);
     }
     *current_model_variant = model_variant;
     app.usage.context_window = Some(resolved_model_spec.context_window());
@@ -172,14 +175,18 @@ pub(super) async fn handle_variant(
         let mut model_spec = rt.policy_snapshot().model;
         model_spec.variant =
             crate::model_selection::reasoning_selection_from_variant(variant.clone());
-        let _ = rt
+        if let Err(error) = rt
             .admin()
             .config()
             .update(SessionConfigPatch {
                 model: Some(model_spec),
                 ..SessionConfigPatch::default()
             })
-            .await;
+            .await
+        {
+            push_system_message(app, format!("Variant update failed to settle: {error}"));
+            return Ok(false);
+        }
     }
     *current_model_variant = variant;
     app.set_model_variant(current_model_variant.clone());
@@ -415,8 +422,8 @@ pub(super) async fn handle_change_provider(
                     return Ok(false);
                 }
             };
-            if let Some(rt) = runtime.as_mut() {
-                let _ = rt
+            if let Some(rt) = runtime.as_mut()
+                && let Err(error) = rt
                     .admin()
                     .config()
                     .update(SessionConfigPatch {
@@ -424,7 +431,15 @@ pub(super) async fn handle_change_provider(
                         model: Some(model_spec),
                         ..SessionConfigPatch::default()
                     })
-                    .await;
+                    .await
+            {
+                push_system_message(app, format!("Provider update failed to settle: {error}"));
+                *provider = previous_provider;
+                app.model = previous_model;
+                app.usage.context_window = previous_context_window;
+                *current_model_variant = previous_variant;
+                app.set_model_variant(current_model_variant.clone());
+                return Ok(false);
             }
             *current_model_variant = model_variant;
             app.usage.context_window = Some(resolved_model_spec.context_window());
@@ -524,7 +539,7 @@ mod tests {
         let temp = TempDirGuard::new("lash-provider-persist");
         let _lash_home = EnvVarGuard::set("LASH_HOME", temp.path());
         let path = crate::paths::config_file();
-        let concrete = lash_core::testing::TestProvider::builder()
+        let concrete = lash::testing::TestProvider::builder()
             .kind("persist-provider")
             .serialize_config(|| serde_json::json!({ "token": "refreshed" }))
             .build();

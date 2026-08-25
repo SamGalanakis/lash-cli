@@ -12,18 +12,18 @@ pub(crate) const COMMIT_BUDGET: (usize, usize) = (1024 * 1024, 512);
 /// Model-action token reserve used when Lash batches queued work.
 pub(crate) const QUEUED_WORK_BATCHING: usize = 1024;
 
-/// Finite RLM VM limits, spanning instructions, wall time, and logical bytes.
+/// Finite RLM VM limits, spanning instructions, wall time, and memory.
 pub(crate) const RLM_EXECUTION_BOUNDS: RlmExecutionBounds = RlmExecutionBounds {
     instructions: 1_000_000,
     wall_clock_seconds: 30,
-    logical_bytes: 64 * 1024 * 1024,
+    memory_mebibytes: 64,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RlmExecutionBounds {
     pub(crate) instructions: u64,
     pub(crate) wall_clock_seconds: u64,
-    pub(crate) logical_bytes: u64,
+    pub(crate) memory_mebibytes: u64,
 }
 
 pub(crate) fn turn_budget() -> lash::TurnBudget {
@@ -43,9 +43,15 @@ pub(crate) fn queued_work_batching() -> lash::QueuedWorkBatchingConfig {
 }
 
 pub(crate) fn rlm_protocol_config() -> lash::rlm::RlmProtocolPluginConfig {
-    lash::rlm::RlmProtocolPluginConfig::new(
-        lash::rlm::ExecutionBound::instructions(RLM_EXECUTION_BOUNDS.instructions),
-        lash::rlm::ExecutionBound::secs(RLM_EXECUTION_BOUNDS.wall_clock_seconds),
-        lash::rlm::ExecutionBound::instructions(RLM_EXECUTION_BOUNDS.logical_bytes),
-    )
+    lash::rlm::RlmProtocolPluginConfig::builder()
+        .instruction_limit(lash::rlm::InstructionBound::instructions(
+            RLM_EXECUTION_BOUNDS.instructions,
+        ))
+        .wall_clock(lash::rlm::WallClockBound::secs(
+            RLM_EXECUTION_BOUNDS.wall_clock_seconds,
+        ))
+        .memory_limit(lash::rlm::MemoryBound::mebibytes(
+            RLM_EXECUTION_BOUNDS.memory_mebibytes,
+        ))
+        .build()
 }

@@ -2,7 +2,7 @@
 mod tests {
     use super::*;
     use crate::prompt_model::PromptRequest;
-    use lash_core::PromptUsage;
+    use lash::runtime::PromptUsage;
     use lash_tui_extensions::{
         TuiExtension, TuiExtensions, TuiHostEffect, TuiRenderContext, TuiSurfaceSize,
         TuiSurfaceSlot, TuiSurfaceSpec,
@@ -129,9 +129,9 @@ mod tests {
         app.set_ui_extensions(ui_extensions);
         app.set_chrome_state(chrome_state);
 
-        app.handle_turn_activity(lash_core::TurnActivity::independent(
-            lash_core::TurnEvent::QueuedWorkStarted {
-                boundary: lash_core::runtime::QueuedWorkClaimBoundary::Idle,
+        app.handle_turn_activity(lash::TurnActivity::independent(
+            lash::TurnEvent::QueuedWorkStarted {
+                boundary: lash::persistence::QueuedWorkClaimBoundary::Idle,
                 batch_ids: Vec::new(),
                 causes: Vec::new(),
             },
@@ -381,10 +381,10 @@ mod tests {
             Arc::new(TuiExtensions::new(vec![chrome_ext]).expect("chrome extension"));
         app.set_ui_extensions(ui_extensions);
         app.set_chrome_state(chrome_state);
-        app.update_processes(vec![lash_core::ProcessHandleView::new(
+        app.update_processes(vec![lash::process::ProcessHandleView::new(
             "process-1",
-            lash_core::ProcessIdentity::new("lashlang").with_label(Some("responder")),
-            lash_core::ProcessStatus::Running,
+            lash::process::ProcessIdentity::new("lashlang").with_label(Some("responder")),
+            lash::process::ProcessStatus::Running,
         )]);
         sync_chrome_turn_status(&app);
 
@@ -422,9 +422,9 @@ mod tests {
     fn process_dock_renders_below_input_and_overview_as_overlay() {
         let mut app = App::new("gpt-5.4".into(), "test".into(), "test-session-id".into());
         app.update_processes(vec![
-            lash_core::ProcessHandleView::new(
+            lash::process::ProcessHandleView::new(
                 "process-1",
-                lash_core::ProcessIdentity::new("lashlang")
+                lash::process::ProcessIdentity::new("lashlang")
                     .with_label(Some("responder"))
                     .with_definition(Some(
                 serde_json::to_value(lashlang::ProcessDefinitionIdentity::new(
@@ -435,7 +435,7 @@ mod tests {
                 ))
                 .expect("process definition serializes"),
                     )),
-                lash_core::ProcessStatus::Running,
+                lash::process::ProcessStatus::Running,
             ),
         ]);
         app.select_next_process();
@@ -623,9 +623,9 @@ mod tests {
             frame.write_text(0, 0, label, Style::default(), frame.area().width);
         }
 
-        fn handle_turn_event(&self, event: &lash_core::TurnEvent) -> Vec<TuiHostEffect> {
+        fn handle_turn_event(&self, event: &lash::TurnEvent) -> Vec<TuiHostEffect> {
             match event {
-                lash_core::TurnEvent::AssistantProseDelta { text } if text.as_ref() == "mount" => vec![
+                lash::TurnEvent::AssistantProseDelta { text } if text.as_ref() == "mount" => vec![
                     TuiHostEffect::MountSurface {
                         spec: TuiSurfaceSpec {
                             key: "workspace".to_string(),
@@ -649,7 +649,7 @@ mod tests {
                         },
                     },
                 ],
-                lash_core::TurnEvent::AssistantProseDelta { text } if text.as_ref() == "overlay" => vec![
+                lash::TurnEvent::AssistantProseDelta { text } if text.as_ref() == "overlay" => vec![
                     TuiHostEffect::MountSurface {
                         spec: TuiSurfaceSpec {
                             key: "overlay".to_string(),
@@ -681,7 +681,7 @@ mod tests {
             TuiExtensions::new(vec![Arc::new(SurfaceTestTuiExtension)])
                 .expect("surface extensions"),
         );
-        ui_extensions.effects_for_turn_event(&lash_core::TurnEvent::AssistantProseDelta {
+        ui_extensions.effects_for_turn_event(&lash::TurnEvent::AssistantProseDelta {
             text: "mount".into(),
         });
         app.set_ui_extensions(Arc::clone(&ui_extensions));
@@ -701,10 +701,10 @@ mod tests {
             TuiExtensions::new(vec![Arc::new(SurfaceTestTuiExtension)])
                 .expect("surface extensions"),
         );
-        ui_extensions.effects_for_turn_event(&lash_core::TurnEvent::AssistantProseDelta {
+        ui_extensions.effects_for_turn_event(&lash::TurnEvent::AssistantProseDelta {
             text: "mount".into(),
         });
-        ui_extensions.effects_for_turn_event(&lash_core::TurnEvent::AssistantProseDelta {
+        ui_extensions.effects_for_turn_event(&lash::TurnEvent::AssistantProseDelta {
             text: "overlay".into(),
         });
         app.set_ui_extensions(Arc::clone(&ui_extensions));

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use lash_core::{TurnActivity, TurnEvent};
+use lash::{TurnActivity, TurnEvent};
 use lash_tui::{PerfCounters, ScreenSnapshot};
 use serde::{Deserialize, Serialize};
 
@@ -529,7 +529,7 @@ mod tests {
         recorder.record_user_turn(&PreparedTurn::new("hello".into(), Vec::new()));
         recorder.record_start_turn();
         recorder.record_turn_activity(&TurnActivity::new(
-            lash_core::TurnActivityId::new("assistant"),
+            lash::TurnActivityId::new("assistant"),
             TurnEvent::AssistantProseDelta {
                 text: "world".into(),
             },

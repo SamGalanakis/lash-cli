@@ -428,10 +428,10 @@ fn draw_tree(frame: &mut Frame<'_>, app: &App, history_area: Rect) {
                 "·"
             };
             let role = match row.message.role {
-                lash_core::MessageRole::User => "user",
-                lash_core::MessageRole::Assistant => "assistant",
-                lash_core::MessageRole::System => "system",
-                lash_core::MessageRole::Event => "event",
+                lash::messages::MessageRole::User => "user",
+                lash::messages::MessageRole::Assistant => "assistant",
+                lash::messages::MessageRole::System => "system",
+                lash::messages::MessageRole::Event => "event",
             };
             let preview = crate::overlay::tree_message_preview(&row.message);
             let active_marker = if row.active { " *" } else { "" };

@@ -1203,7 +1203,7 @@ fn timeout_grep_result(query: &str, stage: &str, budget: Duration, message: &str
         message,
         Some(50),
     );
-    failure.raw = Some(lash_core::ToolValue::from(raw));
+    failure.raw = Some(lash_core::ToolValue::untrusted_json(raw));
     ToolOutcome::failure(failure)
 }
 

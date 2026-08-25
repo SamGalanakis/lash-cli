@@ -9,7 +9,7 @@ use super::*;
 use crate::SkillCatalog;
 use crate::info::{controls_document, help_document, info_document};
 use crate::turn_runner::make_turn_input;
-use lash_core::runtime::ExecutionScope;
+use lash::runtime::ExecutionScope;
 
 #[derive(Clone)]
 pub(super) enum ParsedSlashCommand {
@@ -101,16 +101,16 @@ async fn handle_ui_command(
     }
 }
 
-fn turn_input_has_visible_content(input: &lash_core::TurnInput) -> bool {
+fn turn_input_has_visible_content(input: &lash::TurnInput) -> bool {
     input.items.iter().any(|item| match item {
-        lash_core::InputItem::Text { text } => !text.trim().is_empty(),
-        lash_core::InputItem::Attachment { .. } => true,
+        lash::InputItem::Text { text } => !text.trim().is_empty(),
+        lash::InputItem::Attachment { .. } => true,
     })
 }
 
 fn display_turns_for_pending_inputs(
     app: &mut App,
-    inputs: &[lash_core::PendingTurnInput],
+    inputs: &[lash::PendingTurnInput],
 ) -> Vec<PreparedTurn> {
     let mut turns = Vec::new();
     for input in inputs {
@@ -130,7 +130,7 @@ pub(super) async fn dispatch_queued_turn(
     _args: &Args,
     _paused: &Arc<AtomicBool>,
     _ui_extensions: &TuiExtensions,
-    runtime_factory: &crate::startup::session::CliSessionOpener,
+    _runtime_factory: &crate::startup::session::CliSessionOpener,
     _lash_config: &crate::config::LashConfig,
     runtime: &mut Option<LashSession>,
     _history: &mut Vec<Message>,
@@ -187,7 +187,6 @@ pub(super) async fn dispatch_queued_turn(
         cancel_token,
         active_stream_id,
         app_tx,
-        runtime_factory,
     )
     .await;
     Ok(true)

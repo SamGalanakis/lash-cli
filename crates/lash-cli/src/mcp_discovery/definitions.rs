@@ -1,43 +1,43 @@
 //! Deferred MCP tool definitions.
-use lash_core::{ToolActivation, ToolDefinition};
-use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
+use lash::tools::{ToolActivation, ToolDefinition, ToolDefinitionBindingExt};
+use lash_tool_support::tool_binding;
 use serde_json::{Value, json};
 
-pub(crate) fn search_tools_definition() -> ToolDefinition {
-    #[derive(schemars::JsonSchema)]
-    #[allow(dead_code)]
-    struct SearchToolsArgs {
-        #[schemars(
-            description = "Concise tool search query. Prefer keywords and short intent phrases with the app/domain, action, object, qualifiers, and important fields; for multi-constraint tasks include every constraint, such as \"spotify liked songs library\"."
-        )]
-        query: String,
-        #[cfg(feature = "lashlang")]
-        #[schemars(description = "Optional module filter, such as \"appworld\" or \"web\".")]
-        module: Option<ModuleFilter>,
-        #[schemars(range(min = 1, max = 100))]
-        #[schemars(description = "Maximum number of results to return. Defaults to 10.")]
-        limit: Option<usize>,
-        #[schemars(description = "Exact tool name or names to exclude from results.")]
-        exclude: Option<NameFilter>,
-    }
-
-    #[derive(schemars::JsonSchema)]
-    #[allow(dead_code)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[allow(dead_code)]
+pub(crate) struct SearchToolsArgs {
+    #[schemars(
+        description = "Concise tool search query. Prefer keywords and short intent phrases with the app/domain, action, object, qualifiers, and important fields; for multi-constraint tasks include every constraint, such as \"spotify liked songs library\"."
+    )]
+    pub(crate) query: String,
     #[cfg(feature = "lashlang")]
-    #[serde(untagged)]
-    enum ModuleFilter {
-        One(String),
-        Many(Vec<String>),
-    }
+    #[schemars(description = "Optional module filter, such as \"appworld\" or \"web\".")]
+    pub(crate) module: Option<ModuleFilter>,
+    #[schemars(range(min = 1, max = 100))]
+    #[schemars(description = "Maximum number of results to return. Defaults to 10.")]
+    pub(crate) limit: Option<usize>,
+    #[schemars(description = "Exact tool name or names to exclude from results.")]
+    pub(crate) exclude: Option<NameFilter>,
+}
 
-    #[derive(schemars::JsonSchema)]
-    #[allow(dead_code)]
-    #[serde(untagged)]
-    enum NameFilter {
-        One(String),
-        Many(Vec<String>),
-    }
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[allow(dead_code)]
+#[cfg(feature = "lashlang")]
+#[serde(untagged)]
+pub(crate) enum ModuleFilter {
+    One(String),
+    Many(Vec<String>),
+}
 
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[allow(dead_code)]
+#[serde(untagged)]
+pub(crate) enum NameFilter {
+    One(String),
+    Many(Vec<String>),
+}
+
+pub(crate) fn search_tools_definition() -> ToolDefinition {
     let description = "Search catalogued capabilities, aliases, descriptions, signatures, return fields, and examples. Use this when the capability you need is only listed in the catalogued-capabilities preview or is too sparse to call confidently. Query with concise keywords and short intent phrases: include the app/domain, action, object, qualifiers, and important fields or constraints.";
 
     ToolDefinition::raw(
@@ -48,7 +48,7 @@ pub(crate) fn search_tools_definition() -> ToolDefinition {
         search_tools_output_schema(),
     )
     .with_activation(ToolActivation::Always)
-    .with_tool_binding(ToolBinding::new(["tools"], "search").with_aliases(["tool_search"]))
+    .with_tool_binding(tool_binding(["tools"], "search", &["tool_search"]))
 }
 
 fn schema_for<T>() -> Value

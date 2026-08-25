@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::tree::SessionMessageTreeNode;
-use lash_core::{Message, MessageRole, PartKind};
+use lash::messages::{Message, MessageRole, PartKind};
 
 use crate::command;
 use crate::config::ThemeName;

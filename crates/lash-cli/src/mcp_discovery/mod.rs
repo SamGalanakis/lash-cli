@@ -30,25 +30,19 @@ mod service;
 pub use plugin::ToolDiscoveryPluginFactory;
 pub use resolver::{McpCatalogedTool, McpDeferredToolResolver};
 
-use std::sync::Arc;
-
-use lash_core::ToolProvider;
+use lash::tools::ToolDefinition;
 use serde_json::json;
 
 /// Enumerate provider tools into the shared MCP discovery/deferred record.
-pub fn mcp_cataloged_tools(server: &str, provider: &dyn ToolProvider) -> Vec<McpCatalogedTool> {
-    provider
-        .tool_manifests()
+pub fn mcp_cataloged_tools(
+    server: &str,
+    definitions: impl IntoIterator<Item = ToolDefinition>,
+) -> Vec<McpCatalogedTool> {
+    definitions
         .into_iter()
-        .filter_map(|manifest| {
-            let contract = provider.resolve_contract(&manifest.name)?;
-            Some(McpCatalogedTool {
-                server: server.to_string(),
-                definition: lash_core::ToolDefinition::from_parts(
-                    manifest,
-                    Arc::unwrap_or_clone(contract),
-                ),
-            })
+        .map(|definition| McpCatalogedTool {
+            server: server.to_string(),
+            definition,
         })
         .collect()
 }

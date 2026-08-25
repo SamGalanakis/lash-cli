@@ -8,8 +8,8 @@ fn source_key_draft_id(source_key: &str) -> &str {
 }
 
 fn pending_turn_input_signature(
-    inputs: &[lash_core::PendingTurnInput],
-) -> Vec<(String, Option<String>, lash_core::TurnInputState)> {
+    inputs: &[lash::PendingTurnInput],
+) -> Vec<(String, Option<String>, lash::persistence::TurnInputState)> {
     inputs
         .iter()
         .map(|input| {
@@ -22,37 +22,33 @@ fn pending_turn_input_signature(
         .collect()
 }
 
-fn pending_turn_input_ids(
-    inputs: &[lash_core::PendingTurnInput],
-) -> std::collections::HashSet<String> {
+fn pending_turn_input_ids(inputs: &[lash::PendingTurnInput]) -> std::collections::HashSet<String> {
     inputs.iter().map(|input| input.input_id.clone()).collect()
 }
 
-pub(crate) fn turn_input_display_text(input: &lash_core::TurnInput) -> String {
+pub(crate) fn turn_input_display_text(input: &lash::TurnInput) -> String {
     input
         .items
         .iter()
         .filter_map(|item| match item {
-            lash_core::InputItem::Text { text } => Some(text.as_str()),
-            lash_core::InputItem::Attachment { .. } => None,
+            lash::InputItem::Text { text } => Some(text.as_str()),
+            lash::InputItem::Attachment { .. } => None,
         })
         .collect::<Vec<_>>()
         .join("")
 }
 
-pub(crate) fn prepared_turn_from_queued_input(
-    input: &lash_core::TurnInput,
-) -> Option<PreparedTurn> {
+pub(crate) fn prepared_turn_from_queued_input(input: &lash::TurnInput) -> Option<PreparedTurn> {
     let text = turn_input_display_text(input);
     let images = input
         .items
         .iter()
         .filter_map(|item| match item {
-            lash_core::InputItem::Attachment {
-                source: lash_core::AttachmentSource::Inline { bytes, .. },
+            lash::InputItem::Attachment {
+                source: lash::direct::AttachmentSource::Inline { bytes, .. },
             } => Some(bytes),
-            lash_core::InputItem::Attachment { .. } => None,
-            lash_core::InputItem::Text { .. } => None,
+            lash::InputItem::Attachment { .. } => None,
+            lash::InputItem::Text { .. } => None,
         })
         .enumerate()
         .map(|(idx, png_bytes)| PendingImage {
@@ -86,7 +82,7 @@ impl Queues {
     fn presentation_for_input(
         &self,
         draft_id: Option<&str>,
-        input: &lash_core::TurnInput,
+        input: &lash::TurnInput,
     ) -> Option<PreparedTurn> {
         if let Some(draft_id) = draft_id
             && let Some(turn) = self.draft_presentations.get(draft_id)
@@ -112,19 +108,6 @@ impl App {
             .insert(turn.draft_id.clone(), turn);
     }
 
-    pub fn cache_active_turn_draft(&mut self, turn: PreparedTurn) {
-        self.cache_draft_presentation(turn.clone());
-        self.queues.active_turn_drafts.push(turn);
-    }
-
-    pub fn take_active_turn_drafts(&mut self) -> Vec<PreparedTurn> {
-        std::mem::take(&mut self.queues.active_turn_drafts)
-    }
-
-    pub fn clear_active_turn_drafts(&mut self) {
-        self.queues.active_turn_drafts.clear();
-    }
-
     pub(super) fn take_draft_presentation_by_id(&mut self, draft_id: &str) -> Option<PreparedTurn> {
         self.queues.take_by_draft_id(draft_id)
     }
@@ -136,7 +119,7 @@ impl App {
         self.queues.take_matching_content(content)
     }
 
-    pub fn set_pending_turn_input_snapshot(&mut self, inputs: Vec<lash_core::PendingTurnInput>) {
+    pub fn set_pending_turn_input_snapshot(&mut self, inputs: Vec<lash::PendingTurnInput>) {
         let visible_input_ids = pending_turn_input_ids(&inputs);
         let suppressed_before = self.queues.suppressed_preview_input_ids.len();
         self.queues
@@ -178,7 +161,7 @@ impl App {
         }
     }
 
-    pub fn pending_turn_input_snapshot(&self) -> &[lash_core::PendingTurnInput] {
+    pub fn pending_turn_input_snapshot(&self) -> &[lash::PendingTurnInput] {
         &self.queues.pending_turn_input_snapshot
     }
 
@@ -198,7 +181,7 @@ impl App {
         }
     }
 
-    pub fn queued_input_preview_suppressed(&self, input: &lash_core::PendingTurnInput) -> bool {
+    pub fn queued_input_preview_suppressed(&self, input: &lash::PendingTurnInput) -> bool {
         self.queues
             .suppressed_preview_input_ids
             .contains(&input.input_id)
@@ -211,27 +194,26 @@ impl App {
             }
             !matches!(
                 input.state,
-                lash_core::TurnInputState::Cancelled | lash_core::TurnInputState::Completed
+                lash::persistence::TurnInputState::Cancelled
+                    | lash::persistence::TurnInputState::Completed
             )
         })
     }
 
-    pub fn visible_turn_inputs_for_editing(
-        &self,
-    ) -> impl Iterator<Item = &lash_core::PendingTurnInput> {
+    pub fn visible_turn_inputs_for_editing(&self) -> impl Iterator<Item = &lash::PendingTurnInput> {
         self.queues
             .pending_turn_input_snapshot
             .iter()
             .filter(|input| {
                 !self.queued_input_preview_suppressed(input)
                     && input.state.is_next_turn_pending()
-                    && matches!(input.ingress, lash_core::TurnInputIngress::NextTurn)
+                    && matches!(input.ingress, lash::persistence::TurnInputIngress::NextTurn)
             })
     }
 
     pub fn prepared_turn_for_pending_input(
         &self,
-        pending: &lash_core::PendingTurnInput,
+        pending: &lash::PendingTurnInput,
     ) -> Option<PreparedTurn> {
         let draft_id = pending.source_key.as_deref().map(source_key_draft_id);
         self.queues.presentation_for_input(draft_id, &pending.input)
@@ -239,7 +221,7 @@ impl App {
 
     pub fn take_prepared_turn_for_pending_input(
         &mut self,
-        pending: &lash_core::PendingTurnInput,
+        pending: &lash::PendingTurnInput,
     ) -> Option<PreparedTurn> {
         let draft_id = pending.source_key.as_deref().map(source_key_draft_id);
         if let Some(draft_id) = draft_id
@@ -261,7 +243,7 @@ impl App {
     pub(crate) fn test_seed_queued_turn_snapshot(
         &mut self,
         turn: PreparedTurn,
-        ingress: lash_core::TurnInputIngress,
+        ingress: lash::persistence::TurnInputIngress,
     ) -> String {
         let input_id = format!(
             "test-ti-{}",
@@ -270,14 +252,16 @@ impl App {
         let source_key = format!("host:{}", turn.draft_id);
         self.cache_draft_presentation(turn.clone());
         let state = match ingress {
-            lash_core::TurnInputIngress::ActiveTurn { .. } => {
-                lash_core::TurnInputState::PendingActive
+            lash::persistence::TurnInputIngress::ActiveTurn { .. } => {
+                lash::persistence::TurnInputState::PendingActive
             }
-            lash_core::TurnInputIngress::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
+            lash::persistence::TurnInputIngress::NextTurn => {
+                lash::persistence::TurnInputState::DeferredNextTurn
+            }
         };
         self.queues
             .pending_turn_input_snapshot
-            .push(lash_core::PendingTurnInput {
+            .push(lash::PendingTurnInput {
                 input_id: input_id.clone(),
                 session_id: self.session_id.clone(),
                 enqueue_seq: self.queues.pending_turn_input_snapshot.len() as u64 + 1,

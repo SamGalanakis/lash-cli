@@ -1,7 +1,8 @@
 use lash::CancellationToken;
+use lash::messages::Message;
+use lash::runtime::SessionPolicy;
+use lash::tools::ToolState;
 use lash::{LashSession, provider::ProviderHandle};
-use lash_core::session_model::Message;
-use lash_core::{SessionPolicy, ToolState};
 
 use crate::SkillCatalog;
 use crate::app::{App, UiTimelineItem};
@@ -74,13 +75,13 @@ fn fallback_policy_for_session_switch(
     current_model_variant: &mut Option<String>,
     _current_execution_mode: &mut ExecutionMode,
 ) -> SessionPolicy {
-    let model = lash_core::ModelSpec::builder(app.model.clone())
+    let model = lash::ModelSpec::builder(app.model.clone())
         .variant(crate::model_selection::reasoning_selection_from_variant(
             current_model_variant.clone(),
         ))
         .context_window_tokens(app.usage.context_window.unwrap_or(1) as usize)
         .build()
-        .unwrap_or_else(|_| lash_core::ModelSpec::default())
+        .unwrap_or_else(|_| lash::ModelSpec::default())
         .with_capability(crate::capability_catalog::capability_for(
             provider.kind(),
             &app.model,
@@ -180,7 +181,7 @@ pub(super) async fn handle_retry(
     current_execution_mode: &mut ExecutionMode,
     toolset_hash: &mut String,
     app_tx: &crate::event::AppEventTx,
-    runtime_factory: &CliSessionOpener,
+    _runtime_factory: &CliSessionOpener,
 ) -> anyhow::Result<bool> {
     if let Some(previous) = last_turn.clone() {
         let definitions = match runtime.as_ref() {
@@ -208,7 +209,6 @@ pub(super) async fn handle_retry(
             cancel_token,
             active_stream_id,
             app_tx,
-            runtime_factory,
         )
         .await;
     } else {
@@ -411,7 +411,9 @@ pub(super) async fn handle_resume(
         const SESSION_PICKER_LIMIT: usize = 50;
         let incompatible_count = session_log::incompatible_session_count();
         let current_session_id = logger.session_id.clone();
-        let mut sessions = session_log::list_recent_sessions(SESSION_PICKER_LIMIT + 1).await;
+        let mut sessions = runtime_factory
+            .list_recent_sessions(SESSION_PICKER_LIMIT + 1)
+            .await?;
         sessions.retain(|si| si.session_id != current_session_id);
         if sessions.is_empty() && incompatible_count == 0 {
             app.timeline.push(UiTimelineItem::SystemMessage(

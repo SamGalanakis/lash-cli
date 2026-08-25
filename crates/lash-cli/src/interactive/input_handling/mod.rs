@@ -16,9 +16,9 @@ use std::sync::atomic::AtomicBool;
 
 use crossterm::event::{Event as TermEvent, KeyEvent, KeyEventKind};
 use lash::CancellationToken;
+use lash::messages::Message;
+use lash::tools::ToolState;
 use lash::{LashSession, provider::ProviderHandle};
-use lash_core::ToolState;
-use lash_core::session_model::Message;
 use lash_tui::{InputEvent as TuiInputEvent, Terminal, normalize_event};
 use lash_tui_extensions::{TuiExtensionContext, TuiExtensions, TuiInputOutcome};
 

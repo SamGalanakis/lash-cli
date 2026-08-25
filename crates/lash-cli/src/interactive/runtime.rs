@@ -1,5 +1,5 @@
+use lash::messages::Message;
 use lash::{LashSession, TurnInput};
-use lash_core::Message;
 
 use super::helpers::SessionObservationBridge;
 use super::*;
@@ -17,11 +17,11 @@ use crate::input_items::build_items_from_editor_input;
 #[cfg(test)]
 use lash::InputItem;
 #[cfg(test)]
-use lash_core::MessageRole;
+use lash::messages::MessageRole;
 #[cfg(test)]
-use lash_core::PluginMessage;
+use lash::messages::{Part, PartKind};
 #[cfg(test)]
-use lash_core::session_model::{Part, PartKind};
+use lash::plugins::PluginMessage;
 
 #[cfg(test)]
 pub(crate) async fn make_injected_plugin_message(turn: &PreparedTurn) -> PluginMessage {
@@ -81,7 +81,7 @@ pub(super) async fn sync_runtime_tool_catalog(
 pub(super) async fn enqueue_prepared_turn(
     session: &LashSession,
     turn: &PreparedTurn,
-    ingress: lash_core::TurnInputIngress,
+    ingress: lash::persistence::TurnInputIngress,
 ) -> Result<(), String> {
     session
         .enqueue(make_turn_input(turn))
@@ -123,7 +123,6 @@ pub(super) async fn send_user_message(
     cancel_token: &mut Option<CancellationToken>,
     active_stream_id: &mut u64,
     app_tx: &AppEventTx,
-    runtime_factory: &crate::startup::session::CliSessionOpener,
 ) {
     let mut ui_trace = ui_trace;
     if !prepared_turn.display_text.is_empty() {
@@ -176,12 +175,7 @@ pub(super) async fn send_user_message(
     );
 
     SessionObservationBridge::spawn(&session, stream_id, app_tx.clone());
-    let (cancel, return_rx) = spawn_session_turn(
-        session,
-        turn_input,
-        stream_id,
-        runtime_factory.active_effect_host(),
-    );
+    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id);
     *cancel_token = Some(cancel);
     *runtime_return_rx = Some(return_rx);
 }
@@ -197,7 +191,6 @@ pub(super) async fn send_queued_work(
     cancel_token: &mut Option<CancellationToken>,
     active_stream_id: &mut u64,
     app_tx: &AppEventTx,
-    runtime_factory: &crate::startup::session::CliSessionOpener,
 ) {
     let mut ui_trace = ui_trace;
     for prepared_turn in &prepared_turns {
@@ -236,8 +229,7 @@ pub(super) async fn send_queued_work(
     );
 
     SessionObservationBridge::spawn(&session, stream_id, app_tx.clone());
-    let (cancel, return_rx) =
-        spawn_session_queued_turn(session, stream_id, runtime_factory.active_effect_host());
+    let (cancel, return_rx) = spawn_session_queued_turn(session, stream_id);
     *cancel_token = Some(cancel);
     *runtime_return_rx = Some(return_rx);
 }
@@ -337,9 +329,9 @@ pub(crate) async fn generate_session_name(sessions_dir: &std::path::Path) -> Str
                 .file_name()
                 .and_then(|name| name.to_str())
                 .and_then(|name| name.strip_suffix(".ui.json"))
-                && let Ok(start) = session_log::load_session_start(session_id).await
+                && let Ok(roster) = session_log::load_roster_entry(session_id)
             {
-                existing.insert(start.session_name);
+                existing.insert(roster.session_name);
             }
         }
     }

@@ -5,19 +5,21 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use lash_core::facade_support::{ToolCatalogContribution, TurnOutcome};
-use lash_core::plugin::{
-    PluginCommand, PluginCommandContext, PluginDirective, PluginError, PluginFactory,
-    PluginOperation, PluginOperationFailure, PluginOperationOutcome, PluginRegistrar,
-    PluginRuntimeDirective, PluginSessionContext, PluginSnapshotMeta, PluginTask,
+use lash::messages::MessageRole;
+use lash::plugins::{
+    EnqueueMessagesDirective, PluginCommand, PluginCommandContext, PluginDirective, PluginError,
+    PluginFactory, PluginOperation, PluginOperationFailure, PluginOperationOutcome,
+    PluginRegistrar, PluginRuntimeDirective, PluginSessionContext, PluginSnapshotMeta, PluginTask,
     PluginTaskContext, PromptHookContext, SessionParam, SessionPlugin, SnapshotReader,
-    SnapshotWriter, ToolCallHookContext, ToolCatalogContext, ToolResultHookContext,
-    TurnResultHookContext,
+    SnapshotWriter, ToolCallHookContext, ToolCatalogContext, ToolCatalogContribution,
+    ToolResultHookContext, TurnResultHookContext,
 };
-use lash_core::{
-    MessageRole, PluginMessage, PluginRuntimeEvent, PromptContribution, ToolCall, ToolContract,
-    ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
+use lash::plugins::{PluginMessage, PluginRuntimeEvent};
+use lash::prompt::PromptContribution;
+use lash::tools::{
+    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
 };
+use lash::{TurnInput, TurnOutcome};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -181,7 +183,7 @@ async fn run_autoresearch_command(
     let mut directives = Vec::new();
     if let Some(input) = output.queued_input.clone() {
         directives.push(PluginRuntimeDirective::QueueTurn {
-            input: lash_core::TurnInput::text(input),
+            input: TurnInput::text(input),
             source_key: None,
         });
     }
@@ -280,9 +282,10 @@ impl SessionPlugin for AutoresearchPlugin {
                             state.running.clone(),
                             state.last_run.clone(),
                         );
-                        return Ok(vec![PluginDirective::emit_runtime_events(vec![
-                            status_event(&summary)?,
-                        ])]);
+                        return Ok(vec![
+                            PluginDirective::emit_runtime_events(vec![status_event(&summary)?])
+                                .into(),
+                        ]);
                     }
                     Ok(Vec::new())
                 })
@@ -302,9 +305,9 @@ impl SessionPlugin for AutoresearchPlugin {
                         return Ok(Vec::new());
                     }
                     let summary = full_summary_from_runtime(&after_root, &after_state)?;
-                    Ok(vec![PluginDirective::emit_runtime_events(vec![
-                        status_event(&summary)?,
-                    ])])
+                    Ok(vec![
+                        PluginDirective::emit_runtime_events(vec![status_event(&summary)?]).into(),
+                    ])
                 })
             }));
 
@@ -348,9 +351,10 @@ impl SessionPlugin for AutoresearchPlugin {
                         ),
                     );
                 }
-                Ok(vec![PluginDirective::EnqueueMessages {
+                Ok(vec![EnqueueMessagesDirective {
                     messages: vec![PluginMessage::text(MessageRole::System, message)],
-                }])
+                }
+                .into()])
             })
         }));
 
@@ -447,15 +451,13 @@ use tools::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::InputItem;
-    use lash_core::plugin::{PluginHost, PluginRuntimeDirective};
-    use lash_core::testing::MockSessionManager;
+    use lash::InputItem;
+    use lash::plugins::{PluginHost, PluginRuntimeDirective};
+    use lash::testing::MockSessionManager;
     use tempfile::tempdir;
 
-    fn command_context(
-        manager: Arc<MockSessionManager>,
-    ) -> lash_core::plugin::PluginCommandContext {
-        lash_core::plugin::PluginCommandContext {
+    fn command_context(manager: Arc<MockSessionManager>) -> lash::plugins::PluginCommandContext {
+        lash::plugins::PluginCommandContext {
             session_id: Some("root".to_string()),
             sessions: manager.clone(),
             session_lifecycle: manager.clone(),
@@ -473,7 +475,7 @@ mod tests {
             state,
         }) as Arc<dyn ToolProvider>;
         let registry =
-            lash_core::ToolRegistry::from_tool_provider(provider).expect("tool registry");
+            lash::tools::ToolRegistry::from_tool_provider(provider).expect("tool registry");
         Arc::new(MockSessionManager::default().with_tool_registry(registry))
     }
 
@@ -570,11 +572,11 @@ mod tests {
             workdir: dir.path().to_path_buf(),
             state: Arc::clone(&state),
         })];
-        factories.extend(lash_core::testing::test_code_protocol_factories());
+        factories.extend(lash::testing::test_code_protocol_factories());
         let host = PluginHost::new(factories);
         let session = host.build_session("root", None).expect("session");
 
-        let members = |session: &Arc<lash_core::plugin::PluginSession>| {
+        let members = |session: &Arc<lash::plugins::PluginSession>| {
             session
                 .resolved_tool_catalog("root")
                 .expect("catalog")

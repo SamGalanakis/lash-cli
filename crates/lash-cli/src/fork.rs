@@ -527,7 +527,7 @@ pub async fn fork_current_session(
             .read_view()
             .messages()
             .iter()
-            .filter(|message| message.role == lash_core::MessageRole::User)
+            .filter(|message| message.role == lash::messages::MessageRole::User)
             .count(),
         first_message: String::new(),
         inputs: Vec::new(),

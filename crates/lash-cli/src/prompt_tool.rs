@@ -1,10 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use lash::plugins::{PluginFactory, PluginSpec};
-use lash::tools::{ToolBinding, ToolDefinitionBindingExt};
-use lash_core::plugin::StaticPluginFactory;
-use lash_core::{
-    PluginError, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
+use lash::plugins::{PluginError, PluginFactory, PluginSpec, StaticPluginFactory};
+use lash::tools::{
+    ToolBinding, ToolCall, ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolManifest,
+    ToolOutcome, ToolProvider,
 };
 use serde_json::json;
 

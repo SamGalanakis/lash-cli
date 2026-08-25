@@ -335,7 +335,7 @@ impl ActivityState {
         &mut self,
         name: &str,
         args: Value,
-        output: lash_core::ToolCallOutput,
+        output: lash::tools::ToolCallOutput,
         duration_ms: u64,
     ) -> Vec<ActivityBlock> {
         let name = activity_tool_name(name);
@@ -343,12 +343,12 @@ impl ActivityState {
             lash_core::ToolCallOutcome::Failure(failure) => failure
                 .raw
                 .as_ref()
-                .map(lash_core::ToolValue::to_json_value)
+                .map(lash::tools::ToolValue::to_json_value)
                 .unwrap_or_else(|| output.value_for_projection()),
             lash_core::ToolCallOutcome::Cancelled(cancellation) => cancellation
                 .raw
                 .as_ref()
-                .map(lash_core::ToolValue::to_json_value)
+                .map(lash::tools::ToolValue::to_json_value)
                 .unwrap_or_else(|| output.value_for_projection()),
             lash_core::ToolCallOutcome::Success(_) => output.value_for_projection(),
         };
@@ -390,7 +390,7 @@ impl ActivityState {
         timeline: &mut UiTimeline,
         name: &str,
         args: Value,
-        output: lash_core::ToolCallOutput,
+        output: lash::tools::ToolCallOutput,
         duration_ms: u64,
     ) -> Vec<ActivityBlock> {
         let activities = self.project_tool_output(name, args, output, duration_ms);
@@ -425,9 +425,9 @@ impl ActivityState {
         duration_ms: u64,
     ) -> Vec<ActivityBlock> {
         let output = if success {
-            lash_core::ToolCallOutput::success(result)
+            lash::tools::ToolCallOutput::success(result)
         } else {
-            lash_core::ToolCallOutput::failure(lash_core::ToolFailure::invalid_request(
+            lash::tools::ToolCallOutput::failure(lash::tools::ToolFailure::invalid_request(
                 "test_failure",
                 result.to_string(),
             ))
@@ -515,7 +515,7 @@ pub(crate) mod tests {
         let blocks = state.project_tool_output(
             "read_file",
             json!({ "path": "README.md" }),
-            lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+            lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime(
                 "tool call cancelled",
             )),
             1,

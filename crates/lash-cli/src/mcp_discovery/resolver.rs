@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use async_trait::async_trait;
-use lash_core::ToolDefinition;
+use lash::tools::ToolDefinition;
 use lash_lashlang_runtime::{
     DeferredToolResolver, Resolution, ToolGrant, required_tool_lashlang_executable,
 };

@@ -558,8 +558,8 @@ fn materialize_test_provider(config: &ProviderConfig) -> Result<ProviderHandle, 
 }
 
 #[cfg(feature = "test-provider")]
-fn rlm_typescript_smoke_provider() -> lash_core::testing::TestProvider {
-    lash_core::testing::TestProvider::builder()
+fn rlm_typescript_smoke_provider() -> lash::testing::TestProvider {
+    lash::testing::TestProvider::builder()
         .kind("test")
         .serialize_config(|| {
             serde_json::json!({
@@ -570,9 +570,9 @@ fn rlm_typescript_smoke_provider() -> lash_core::testing::TestProvider {
             let response = r#"<typescript>
 finish("typescript-ok");
 </typescript>"#;
-            Ok(lash_core::LlmResponse {
+            Ok(lash::provider::LlmResponse {
                 full_text: response.to_string(),
-                parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
                 }],
@@ -583,8 +583,8 @@ finish("typescript-ok");
 }
 
 #[cfg(feature = "test-provider")]
-fn standard_echo_provider() -> lash_core::testing::TestProvider {
-    lash_core::testing::TestProvider::builder()
+fn standard_echo_provider() -> lash::testing::TestProvider {
+    lash::testing::TestProvider::builder()
         .kind("test")
         .serialize_config(|| {
             serde_json::json!({
@@ -599,9 +599,9 @@ fn standard_echo_provider() -> lash_core::testing::TestProvider {
                 "interactive prompt"
             };
             let response = format!("test-provider echo: {prompt}");
-            Ok(lash_core::LlmResponse {
+            Ok(lash::provider::LlmResponse {
                 full_text: response.clone(),
-                parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response,
                     response_meta: None,
                 }],
@@ -612,8 +612,8 @@ fn standard_echo_provider() -> lash_core::testing::TestProvider {
 }
 
 #[cfg(feature = "test-provider")]
-fn standard_slow_echo_provider() -> lash_core::testing::TestProvider {
-    lash_core::testing::TestProvider::builder()
+fn standard_slow_echo_provider() -> lash::testing::TestProvider {
+    lash::testing::TestProvider::builder()
         .kind("test")
         .serialize_config(|| {
             serde_json::json!({
@@ -630,9 +630,9 @@ fn standard_slow_echo_provider() -> lash_core::testing::TestProvider {
             } else {
                 "test-provider echo: interactive prompt"
             };
-            Ok(lash_core::LlmResponse {
+            Ok(lash::provider::LlmResponse {
                 full_text: response.to_string(),
-                parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
                 }],
@@ -643,8 +643,8 @@ fn standard_slow_echo_provider() -> lash_core::testing::TestProvider {
 }
 
 #[cfg(feature = "test-provider")]
-fn standard_gated_escape_provider() -> lash_core::testing::TestProvider {
-    lash_core::testing::TestProvider::builder()
+fn standard_gated_escape_provider() -> lash::testing::TestProvider {
+    lash::testing::TestProvider::builder()
         .kind("test")
         .serialize_config(|| {
             serde_json::json!({
@@ -662,9 +662,9 @@ fn standard_gated_escape_provider() -> lash_core::testing::TestProvider {
             } else {
                 "test-provider echo: interactive prompt"
             };
-            Ok(lash_core::LlmResponse {
+            Ok(lash::provider::LlmResponse {
                 full_text: response.to_string(),
-                parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
                 }],
@@ -675,8 +675,8 @@ fn standard_gated_escape_provider() -> lash_core::testing::TestProvider {
 }
 
 #[cfg(feature = "test-provider")]
-fn rlm_subagent_smoke_provider() -> lash_core::testing::TestProvider {
-    lash_core::testing::TestProvider::builder()
+fn rlm_subagent_smoke_provider() -> lash::testing::TestProvider {
+    lash::testing::TestProvider::builder()
         .kind("test")
         .serialize_config(|| {
             serde_json::json!({
@@ -698,9 +698,9 @@ result = await agents.spawn({
 finish result.value
 </lashlang>"#
             };
-            Ok(lash_core::LlmResponse {
+            Ok(lash::provider::LlmResponse {
                 full_text: response.to_string(),
-                parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
                 }],
@@ -711,8 +711,8 @@ finish result.value
 }
 
 #[cfg(feature = "test-provider")]
-fn rlm_workspace_smoke_provider() -> lash_core::testing::TestProvider {
-    lash_core::testing::TestProvider::builder()
+fn rlm_workspace_smoke_provider() -> lash::testing::TestProvider {
+    lash::testing::TestProvider::builder()
         .kind("test")
         .serialize_config(|| {
             serde_json::json!({
@@ -729,9 +729,9 @@ if write.exit_code == 0 {
   finish format("workspace-smoke-failed exit={}", write.exit_code)
 }
 </lashlang>"#;
-            Ok(lash_core::LlmResponse {
+            Ok(lash::provider::LlmResponse {
                 full_text: response.to_string(),
-                parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
                 }],
@@ -742,8 +742,8 @@ if write.exit_code == 0 {
 }
 
 #[cfg(feature = "test-provider")]
-fn rlm_nonzero_exit_smoke_provider() -> lash_core::testing::TestProvider {
-    lash_core::testing::TestProvider::builder()
+fn rlm_nonzero_exit_smoke_provider() -> lash::testing::TestProvider {
+    lash::testing::TestProvider::builder()
         .kind("test")
         .serialize_config(|| {
             serde_json::json!({
@@ -755,9 +755,9 @@ fn rlm_nonzero_exit_smoke_provider() -> lash_core::testing::TestProvider {
 result = await shell.exec({ cmd: "sh -c 'echo qc-nonzero-stderr >&2; exit 7'" })?
 finish format("nonzero-smoke-ok exit={}", result.exit_code)
 </lashlang>"#;
-            Ok(lash_core::LlmResponse {
+            Ok(lash::provider::LlmResponse {
                 full_text: response.to_string(),
-                parts: vec![lash_core::llm::types::LlmOutputPart::Text {
+                parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
                 }],
@@ -768,7 +768,7 @@ finish format("nonzero-smoke-ok exit={}", result.exit_code)
 }
 
 #[cfg(feature = "test-provider")]
-fn record_test_provider_request(scenario: &str, request: &lash_core::LlmRequest) {
+fn record_test_provider_request(scenario: &str, request: &lash::provider::LlmRequest) {
     let Some(lash_home) = std::env::var_os("LASH_HOME") else {
         return;
     };
@@ -793,19 +793,17 @@ fn record_test_provider_request(scenario: &str, request: &lash_core::LlmRequest)
 }
 
 #[cfg(feature = "test-provider")]
-fn request_visible_user_texts(request: &lash_core::LlmRequest) -> Vec<String> {
+fn request_visible_user_texts(request: &lash::provider::LlmRequest) -> Vec<String> {
     request
         .messages
         .iter()
-        .filter(|message| message.role == lash_core::llm::types::LlmRole::User)
+        .filter(|message| message.role == lash::provider::LlmRole::User)
         .filter_map(|message| {
             let text = message
                 .blocks
                 .iter()
                 .filter_map(|part| match part {
-                    lash_core::llm::types::LlmContentBlock::Text { text, .. } => {
-                        Some(text.as_ref())
-                    }
+                    lash::provider::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -837,17 +835,17 @@ async fn wait_for_test_provider_marker(name: &str) {
 }
 
 #[cfg(feature = "test-provider")]
-fn request_contains_text(request: &lash_core::LlmRequest, needle: &str) -> bool {
+fn request_contains_text(request: &lash::provider::LlmRequest, needle: &str) -> bool {
     request.messages.iter().any(|message| {
         message.blocks.iter().any(|part| match part {
-            lash_core::llm::types::LlmContentBlock::Text { text, .. } => text.contains(needle),
+            lash::provider::LlmContentBlock::Text { text, .. } => text.contains(needle),
             _ => false,
         })
     })
 }
 
 #[cfg(feature = "test-provider")]
-fn request_contains_subagent_prompt(request: &lash_core::LlmRequest) -> bool {
+fn request_contains_subagent_prompt(request: &lash::provider::LlmRequest) -> bool {
     request_contains_text(request, "Subagent capability: explore. Depth: 1/5.")
         || request_contains_text(request, "Finish `{ value: \\\"subagent-ok\\\" }` exactly.")
 }

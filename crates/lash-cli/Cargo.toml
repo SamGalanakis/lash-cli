@@ -13,7 +13,7 @@ fff-zlob = ["lash-search-tools/fff-zlob"]
 lashlang = []
 # Optional semantic ranking for the tool-discovery example.
 semantic-tool-search = ["dep:model2vec-rs"]
-test-provider = ["lash-core/testing"]
+test-provider = ["lash/testing"]
 bench = ["dep:lash-cli-perf"]
 
 [lib]
@@ -75,11 +75,11 @@ dhat = { version = "0.3", optional = true }
 schemars = { workspace = true }
 strsim = "0.11"
 model2vec-rs = { version = "0.1.4", optional = true }
+lash-trace = { workspace = true }
 
 [dev-dependencies]
 lash-debug-cli-harness = { path = "../lash-debug-cli-harness" }
-lash-core = { workspace = true, features = ["testing"] }
-lash-trace = { workspace = true }
+lash = { workspace = true, features = ["testing"] }
 lashlang = { workspace = true }
 tempfile = { workspace = true }
 

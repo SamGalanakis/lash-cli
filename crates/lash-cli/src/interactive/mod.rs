@@ -8,10 +8,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossterm::event::Event as TermEvent;
 use lash::CancellationToken;
+use lash::messages::Message;
+use lash::persistence::RuntimeSessionState;
+use lash::tools::ToolState;
+use lash::usage::TokenUsage;
 use lash::{LashSession, TurnEvent, provider::ProviderHandle};
-use lash_core::runtime::RuntimeSessionState;
-use lash_core::session_model::Message;
-use lash_core::{TokenUsage, ToolState};
 use lash_tui::{InputEvent as TuiInputEvent, Terminal, normalize_event};
 use lash_tui_extensions::{TuiExtensionContext, TuiExtensions, TuiSlashInvocation};
 
@@ -292,7 +293,6 @@ pub(crate) async fn run_app(
                 &mut cancel_token,
                 &mut active_stream_id,
                 &app_tx,
-                &runtime_factory,
             )
             .await;
             last_turn = Some(TurnReplayPayload {
@@ -466,7 +466,6 @@ pub(crate) async fn run_app(
                         "reconciling completed runtime turn"
                     );
                     if interrupted {
-                        let interrupted_active_turn_drafts = app.take_active_turn_drafts();
                         let had_manual_interrupt_message = matches!(
                             app.timeline.last(),
                             Some(UiTimelineItem::SystemMessage(message))
@@ -486,13 +485,6 @@ pub(crate) async fn run_app(
                         app.clear_manual_interrupt_requested();
                         runtime_return_rx = None;
                         cancel_token = None;
-                        defer_interrupted_active_turn_drafts(
-                            runtime.as_ref(),
-                            &mut app,
-                            done.stream_id,
-                            interrupted_active_turn_drafts,
-                        )
-                        .await;
                         dispatch_queued_turn(
                             &mut app,
                             &mut ui_trace,
@@ -977,37 +969,4 @@ pub(crate) async fn run_app(
     app.save_history();
 
     Ok(())
-}
-
-async fn defer_interrupted_active_turn_drafts(
-    session: Option<&LashSession>,
-    app: &mut App,
-    stream_id: u64,
-    drafts: Vec<PreparedTurn>,
-) {
-    let Some(session) = session else {
-        for draft in drafts {
-            app.restore_prepared_turn(draft);
-        }
-        return;
-    };
-    for draft in drafts {
-        let replay_id = format!("interrupt-replay:{stream_id}:{}", draft.draft_id);
-        match session
-            .enqueue(make_turn_input(&draft))
-            .id(replay_id)
-            .ingress(lash_core::TurnInputIngress::NextTurn)
-            .send()
-            .await
-        {
-            Ok(_) => app.cache_draft_presentation(draft),
-            Err(error) => {
-                push_system_message(
-                    app,
-                    format!("Failed to preserve interrupted input: {error}"),
-                );
-                app.restore_prepared_turn(draft);
-            }
-        }
-    }
 }
