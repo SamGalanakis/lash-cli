@@ -1,6 +1,7 @@
 mod commands;
 mod helpers;
 mod input_handling;
+pub(crate) use input_handling::restore_cancelled_input_texts;
 mod runtime;
 
 use std::sync::Arc;
@@ -403,6 +404,7 @@ pub(crate) async fn run_app(
                         &done.result.outcome,
                         lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
                     );
+                    let cancel_input_outcome = done.result.cancel_input_outcome.clone();
                     let active_turn_had_visible_output = app
                         .live
                         .turn
@@ -482,6 +484,7 @@ pub(crate) async fn run_app(
                             &ui_projection_state,
                             interrupted_message.clone(),
                         );
+                        restore_cancelled_input_texts(&mut app, &cancel_input_outcome);
                         app.clear_manual_interrupt_requested();
                         runtime_return_rx = None;
                         cancel_token = None;
@@ -911,6 +914,15 @@ pub(crate) async fn run_app(
                     app.clear_pending_ui_activity_records();
                 }
                 apply_ui_host_effects(&mut app, ui_effects);
+            }
+            AppEvent::ActiveTurnObserved { stream_id, turn_id } => {
+                if session_activity_is_current(
+                    stream_id,
+                    active_stream_id,
+                    runtime_return_rx.is_some(),
+                ) {
+                    app.set_active_turn_id(turn_id);
+                }
             }
             AppEvent::Prompt {
                 request,

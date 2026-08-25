@@ -657,6 +657,8 @@ pub struct App {
     lashlang_block_anchors: HashMap<String, (usize, usize)>,
     /// Set only when this local UI requested cancellation via Esc.
     manual_interrupt_requested: bool,
+    /// Physical Lash turn identity learned from the builder's turn-scoped activity sink.
+    active_turn_id: Option<String>,
     /// Retry details to keep visible once the retry request is in flight.
     pending_retry_status: Option<String>,
     /// Current text selection state.
@@ -911,6 +913,7 @@ impl App {
             next_lashlang_block_ordinal: 0,
             lashlang_block_anchors: HashMap::new(),
             manual_interrupt_requested: false,
+            active_turn_id: None,
             pending_retry_status: None,
             selection: TextSelection::default(),
             toast: None,

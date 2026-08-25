@@ -11,6 +11,8 @@ mod mouse;
 mod shortcuts;
 mod turns;
 
+pub(crate) use shortcuts::restore_cancelled_input_texts;
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 

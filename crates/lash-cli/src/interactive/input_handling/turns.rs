@@ -506,7 +506,14 @@ async fn handle_enter_submit(ctx: &mut SessionCtx<'_>) -> anyhow::Result<bool> {
             ctx.app.restore_prepared_turn(queued);
             return Ok(false);
         };
-        let active_turn_id = format!("cli-turn:{}", *ctx.active_stream_id);
+        let Some(active_turn_id) = ctx.app.active_turn_id().map(ToOwned::to_owned) else {
+            push_system_message(
+                ctx.app,
+                "Current-turn injection is unavailable until Lash reports the active turn identity.",
+            );
+            ctx.app.restore_prepared_turn(queued);
+            return Ok(false);
+        };
         match enqueue_prepared_turn(
             session,
             &queued,

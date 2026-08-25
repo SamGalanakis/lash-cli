@@ -21,6 +21,10 @@ pub enum AppEvent {
         stream_id: u64,
         activity: Box<TurnActivity>,
     },
+    ActiveTurnObserved {
+        stream_id: u64,
+        turn_id: String,
+    },
     Prompt {
         request: PromptRequest,
         response_tx: std::sync::mpsc::Sender<PromptResponse>,
@@ -173,9 +177,10 @@ impl AppEventTx {
 
 fn lane_for_event(event: &AppEvent) -> EventLane {
     match event {
-        AppEvent::Terminal(_) | AppEvent::ClipboardImageReady { .. } | AppEvent::Quit => {
-            EventLane::High
-        }
+        AppEvent::Terminal(_)
+        | AppEvent::ClipboardImageReady { .. }
+        | AppEvent::ActiveTurnObserved { .. }
+        | AppEvent::Quit => EventLane::High,
         AppEvent::Session { .. }
         | AppEvent::ProcessChanged { .. }
         | AppEvent::Prompt { .. }

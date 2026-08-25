@@ -140,32 +140,52 @@ fn cli_interactive_pty_smoke_runs_turn_and_exits() {
 
 #[test]
 fn cli_interactive_pty_active_steer_escape_restores_editor_without_replay() {
-    let lash_home = test_lash_home("standard-slow-echo");
+    let lash_home = test_lash_home("standard-gated-escape");
     let mut harness = start_interactive_harness(&lash_home, ExecutionMode::Standard, None);
 
     harness
-        .send_line("slow initial prompt")
-        .expect("send slow prompt");
-    std::thread::sleep(Duration::from_millis(250));
+        .send_line("gated initial prompt")
+        .expect("send gated prompt");
+    wait_for_marker(
+        lash_home.path(),
+        "gated-initial-started",
+        Duration::from_secs(10),
+    );
+    harness
+        .wait_for_text("Thinking", Duration::from_secs(10))
+        .expect("wait for injectable provider phase");
     harness
         .type_text("queued after escape")
         .expect("type active steer");
     harness.press_key("Enter").expect("submit active steer");
     harness
-        .wait_for_text("queued after escape", Duration::from_secs(10))
+        .wait_for_text("Will send in this turn", Duration::from_secs(10))
         .expect("wait for active steer preview");
     harness.press_key("Esc").expect("interrupt active turn");
     harness
-        .wait_for_text("Manually interrupted.", Duration::from_secs(30))
-        .expect("wait for manual interrupt marker");
+        .wait_for_text("Manually interrupted.", Duration::from_secs(5))
+        .expect("Escape returns to the redraw loop before provider release");
     harness
-        .wait_for_text("queued after escape", Duration::from_secs(10))
-        .expect("wait for restored editor draft");
-
-    let restored_screen = harness.screen_text().expect("read restored editor screen");
+        .type_text("responsive draft")
+        .expect("type while cancellation is settling");
+    let responsive = harness
+        .wait_for_text("responsive draft", Duration::from_secs(5))
+        .expect("editor stays responsive before provider release");
+    assert!(
+        !lash_home.path().join("gated-initial-release").exists()
+            && responsive.contains("responsive draft"),
+        "Escape must return control to the editor before the gated provider is released\nscreen:\n{responsive}"
+    );
+    write_marker(lash_home.path(), "gated-initial-release");
+    let restored_screen = wait_for_cancelled_draft_restore(
+        &mut harness,
+        "queued after escape",
+        Duration::from_secs(10),
+    );
     assert!(
         restored_screen.contains("Manually interrupted.")
             && restored_screen.contains("queued after escape")
+            && restored_screen.contains("responsive draft")
             && !restored_screen.contains("test-provider echo: queued after escape")
             && !restored_screen.contains("Queued for next turn"),
         "screen should show the interrupted turn and restored, unsent steer\nscreen:\n{restored_screen}"
@@ -618,5 +638,43 @@ fn run_lash_with_timeout(command: &mut Command, timeout: Duration) -> Output {
             );
         }
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn wait_for_marker(lash_home: &std::path::Path, name: &str, timeout: Duration) {
+    let path = lash_home.join(name);
+    let deadline = Instant::now() + timeout;
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for test-provider marker {}",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn write_marker(lash_home: &std::path::Path, name: &str) {
+    let path = lash_home.join(name);
+    std::fs::write(&path, b"release\n")
+        .unwrap_or_else(|err| panic!("write test-provider marker {}: {err}", path.display()));
+}
+
+fn wait_for_cancelled_draft_restore(
+    harness: &mut LiveHarness,
+    restored_text: &str,
+    timeout: Duration,
+) -> String {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let screen = harness.screen_text().expect("read cancellation screen");
+        if screen.contains(restored_text) && !screen.contains("Will send in this turn") {
+            return screen;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for settled cancellation report and restored draft\nscreen:\n{screen}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
     }
 }

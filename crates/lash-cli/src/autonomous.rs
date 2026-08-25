@@ -365,7 +365,7 @@ async fn run_autonomous_turn(
     let observable = session.observe();
     let cursor = observable.current_observation().cursor;
     let mut observation = Some(observable.subscribe_and_recover(cursor));
-    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id);
+    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id, None);
     #[cfg(unix)]
     {
         let cancel = cancel.clone();

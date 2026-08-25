@@ -36,20 +36,6 @@ pub async fn load_resumed_session(
     app.usage.token_usage = session.usage_report().usage.usage;
     app.plugin_mode_indicators = loaded.plugin_mode_indicators;
     app.replace_ui_activity_journal(loaded.ui_activity_journal);
-    match session_log::take_cancel_recovery(&loaded.session_id) {
-        Ok(texts) if !texts.is_empty() => {
-            app.timeline.push(UiTimelineItem::SystemMessage(format!(
-                "Inputs dropped by the last cancelled turn:\n{}",
-                texts.join("\n\n")
-            )));
-        }
-        Ok(_) => {}
-        Err(error) => {
-            app.timeline.push(UiTimelineItem::SystemMessage(format!(
-                "Could not read cancelled-input recovery: {error}"
-            )));
-        }
-    }
     app.timeline.push(UiTimelineItem::SystemMessage(format!(
         "Resumed: {}",
         loaded.filename

@@ -91,7 +91,7 @@ pub(super) async fn handle_global_shortcut_key(
             app.timeline
                 .push_system_message_if_new(crate::util::manual_interrupt_message().to_string());
             let process_cancel = cancel_token.take();
-            cancel_active_turn_and_restore(ctx, process_cancel).await;
+            cancel_active_turn(ctx, process_cancel).await;
             return Ok(Some(false));
         }
         if !app.input().is_empty() || app.has_pending_input_payload() {
@@ -199,7 +199,7 @@ pub(super) async fn handle_global_shortcut_key(
                     crate::util::manual_interrupt_message().to_string(),
                 );
                 let process_cancel = cancel_token.take();
-                cancel_active_turn_and_restore(ctx, process_cancel).await;
+                cancel_active_turn(ctx, process_cancel).await;
             }
             // When idle with no dialog: no-op
         }
@@ -209,7 +209,7 @@ pub(super) async fn handle_global_shortcut_key(
     Ok(None)
 }
 
-async fn cancel_active_turn_and_restore(
+async fn cancel_active_turn(
     ctx: &mut SessionCtx<'_>,
     process_cancel: Option<lash::CancellationToken>,
 ) {
@@ -219,15 +219,22 @@ async fn cancel_active_turn_and_restore(
         }
         return;
     };
+    let Some(turn_id) = ctx.app.active_turn_id().map(ToOwned::to_owned) else {
+        if let Some(token) = process_cancel {
+            token.cancel();
+        }
+        tracing::warn!("exact turn cancellation target has not been observed");
+        return;
+    };
     let stream_id = *ctx.active_stream_id;
     match ctx
         .runtime_factory
-        .cancel_active_turn(&session_id, stream_id, process_cancel)
+        .cancel_active_turn(&session_id, &turn_id, process_cancel)
         .await
     {
-        Ok(outcome) => restore_cancelled_input_texts(ctx.app, &session_id, &outcome),
+        Ok(()) => {}
         Err(error) => {
-            tracing::warn!(stream_id, %error, "exact turn cancellation request failed");
+            tracing::warn!(stream_id, turn_id, %error, "exact turn cancellation request failed");
         }
     }
 }
@@ -254,11 +261,7 @@ fn prepend_cancelled_input_texts(current: &str, texts: &[String]) -> Option<Stri
     })
 }
 
-fn restore_cancelled_input_texts(
-    app: &mut App,
-    session_id: &str,
-    outcome: &lash::TurnCancelInputOutcome,
-) {
+pub(crate) fn restore_cancelled_input_texts(app: &mut App, outcome: &lash::TurnCancelInputOutcome) {
     let dropped_input_ids = outcome
         .affected_inputs
         .iter()
@@ -270,14 +273,8 @@ fn restore_cancelled_input_texts(
     let Some(restored) = prepend_cancelled_input_texts(app.input(), &texts) else {
         return;
     };
-    if let Err(error) = crate::session_log::save_cancel_recovery(session_id, &texts) {
-        tracing::warn!(%error, "failed to save cancelled-input recovery sidecar");
-    }
     app.set_input(restored);
     app.update_suggestions();
-    if let Err(error) = crate::session_log::clear_cancel_recovery(session_id) {
-        tracing::warn!(%error, "failed to clear cancelled-input recovery sidecar");
-    }
 }
 
 fn is_command_palette_shortcut(key: KeyEvent) -> bool {

@@ -165,6 +165,7 @@ pub(super) async fn send_user_message(
     );
     *active_stream_id = active_stream_id.wrapping_add(1);
     let stream_id = *active_stream_id;
+    app.set_active_turn_id(format!("cli-turn:{stream_id}"));
 
     tracing::debug!(
         stream_id,
@@ -175,7 +176,8 @@ pub(super) async fn send_user_message(
     );
 
     SessionObservationBridge::spawn(&session, stream_id, app_tx.clone());
-    let (cancel, return_rx) = spawn_session_turn(session, turn_input, stream_id);
+    let (cancel, return_rx) =
+        spawn_session_turn(session, turn_input, stream_id, Some(app_tx.clone()));
     *cancel_token = Some(cancel);
     *runtime_return_rx = Some(return_rx);
 }
@@ -229,7 +231,7 @@ pub(super) async fn send_queued_work(
     );
 
     SessionObservationBridge::spawn(&session, stream_id, app_tx.clone());
-    let (cancel, return_rx) = spawn_session_queued_turn(session, stream_id);
+    let (cancel, return_rx) = spawn_session_queued_turn(session, stream_id, Some(app_tx.clone()));
     *cancel_token = Some(cancel);
     *runtime_return_rx = Some(return_rx);
 }

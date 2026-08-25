@@ -100,10 +100,6 @@ impl SessionLogger {
         sessions_dir().join(format!("{session_id}.ui-activity.jsonl"))
     }
 
-    fn cancel_recovery_path_for(session_id: &str) -> PathBuf {
-        sessions_dir().join(format!("{session_id}.cancel-recovery.json"))
-    }
-
     pub fn record_host_input(&self, turn: &PreparedTurn) -> Result<()> {
         let mut roster = load_roster_entry(&self.session_id)?;
         roster.message_count = roster.message_count.saturating_add(1);
@@ -133,35 +129,6 @@ impl SessionLogger {
         }
         Ok(())
     }
-}
-
-pub(crate) fn save_cancel_recovery(session_id: &str, texts: &[String]) -> Result<()> {
-    std::fs::create_dir_all(sessions_dir())?;
-    std::fs::write(
-        SessionLogger::cancel_recovery_path_for(session_id),
-        serde_json::to_vec_pretty(texts)?,
-    )?;
-    Ok(())
-}
-
-pub(crate) fn clear_cancel_recovery(session_id: &str) -> Result<()> {
-    match std::fs::remove_file(SessionLogger::cancel_recovery_path_for(session_id)) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-pub(crate) fn take_cancel_recovery(session_id: &str) -> Result<Vec<String>> {
-    let path = SessionLogger::cancel_recovery_path_for(session_id);
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.into()),
-    };
-    let texts = serde_json::from_slice(&bytes)?;
-    clear_cancel_recovery(session_id)?;
-    Ok(texts)
 }
 
 pub(crate) fn save_roster_entry(entry: &RosterEntry) -> Result<()> {

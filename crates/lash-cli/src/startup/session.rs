@@ -203,29 +203,23 @@ impl CliSessionOpener {
     pub(crate) async fn cancel_active_turn(
         &self,
         session_id: &str,
-        stream_id: u64,
+        turn_id: &str,
         process_cancel: Option<lash::CancellationToken>,
-    ) -> Result<lash::TurnCancelInputOutcome> {
+    ) -> Result<()> {
         let driver = self.active_core().await?.turn_work_driver();
-        let address = lash::TurnAddress::new(session_id, format!("cli-turn:{stream_id}"));
+        let address = lash::TurnAddress::new(session_id, turn_id);
         let request = lash::TurnCancelRequest::new(
-            address.clone(),
+            address,
             format!("cli-cancel:{}", uuid::Uuid::new_v4()),
             Some("interactive-user".to_string()),
         )
         .with_reason("operator requested turn cancellation")
         .undelivered(lash::TurnCancelDisposition::Drop);
-        let requested = driver.request_cancel(request.clone()).await;
+        let requested = driver.request_cancel(request).await.map(|_| ());
         if let Some(token) = process_cancel {
             token.cancel();
         }
-        requested?;
-        driver.await_terminal(&address).await?;
-        let settled = driver.request_cancel(request).await?;
-        Ok(settled
-            .record
-            .and_then(|record| record.outcome)
-            .unwrap_or_default())
+        Ok(requested?)
     }
 
     pub(crate) async fn fork_at(&self, node_id: &str, child_session_id: &str) -> Result<()> {
