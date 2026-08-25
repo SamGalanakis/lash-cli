@@ -1105,17 +1105,42 @@ fn snippet_preview_wraps_long_markdown_bullets_to_viewport_width() {
 }
 
 #[test]
-fn lashlang_code_block_is_hidden_below_full_expand() {
+fn lashlang_code_block_collapses_to_a_stub_row_below_full_expand() {
     let blocks = vec![UiTimelineItem::LashlangCode(
         "r = await tools.read_file({ path: \"a\" })\nfinish r.value".to_string(),
     )];
     for level in [0u8, 1] {
         let rendered = render_block(&blocks, 0, level, 80, 24);
+        let text: Vec<String> = rendered.into_iter().map(line_to_plain_text).collect();
+        assert_eq!(
+            text,
+            vec!["◇ code · 2 lines — Alt+O to expand".to_string()],
+            "expected a single stub row at expand_level {level}",
+        );
         assert!(
-            rendered.is_empty(),
-            "expected no output at expand_level {level}, got {rendered:?}",
+            !text.iter().any(|line| line.contains("finish r.value")),
+            "code body must stay hidden at expand_level {level}; got {text:?}",
         );
     }
+}
+
+#[test]
+fn lashlang_code_stub_row_names_the_session_dialect() {
+    let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
+    app.timeline = vec![UiTimelineItem::LashlangCode("finish 1".to_string())].into();
+    app.expand_level = 0;
+    app.set_rlm_dialect(Some(crate::execution_settings::RlmDialect::Typescript));
+
+    let text: Vec<String> = render_block_lines(&app, 0, 80, 24)
+        .into_iter()
+        .map(line_to_plain_text)
+        .collect();
+
+    assert_eq!(
+        text,
+        vec!["◇ typescript · 1 line — Alt+O to expand".to_string()],
+        "stub row should name the session dialect",
+    );
 }
 
 #[test]

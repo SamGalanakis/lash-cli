@@ -311,6 +311,7 @@ pub(super) async fn handle_builtin_command(
         command::Command::Mode(new_mode) => {
             provider::handle_mode(new_mode, app, current_execution_mode)
         }
+        command::Command::Expand(level) => session::handle_expand(level, app),
         command::Command::ChangeProvider => {
             provider::handle_change_provider(
                 terminal,

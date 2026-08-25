@@ -119,6 +119,16 @@ pub const COMMANDS: &[CommandSpec] = &[
         runs_out_of_band: false,
     },
     CommandSpec {
+        name: "/expand",
+        aliases: &[],
+        usage: "/expand [compact|normal|full]",
+        description: "Show or set timeline expansion (Ctrl+O cycles, Alt+O full)",
+        argument_hint: Some("[compact|normal|full]"),
+        argument_options: &["compact", "normal", "full"],
+        takes_argument: true,
+        runs_out_of_band: true,
+    },
+    CommandSpec {
         name: "/provider",
         aliases: &["/login"],
         usage: "/provider",
@@ -293,6 +303,7 @@ pub fn runs_out_of_band_while_running(cmd: &Command) -> bool {
         Command::Model(_) => "/model",
         Command::Variant(_) => "/variant",
         Command::Mode(_) => "/mode",
+        Command::Expand(_) => "/expand",
         Command::ChangeProvider => "/provider",
         Command::Logout => "/logout",
         Command::Retry => "/retry",
@@ -320,6 +331,7 @@ pub enum Command {
     Model(Option<String>),
     Variant(Option<String>),
     Mode(Option<String>),
+    Expand(Option<String>),
     ChangeProvider,
     Logout,
     Retry,
@@ -374,6 +386,9 @@ pub fn parse(input: &str, _skills: &SkillCatalog) -> Option<Command> {
             arg.filter(|a| !a.is_empty()).map(|a| a.to_string()),
         )),
         "mode" => Some(Command::Mode(
+            arg.filter(|a| !a.is_empty()).map(|a| a.to_string()),
+        )),
+        "expand" => Some(Command::Expand(
             arg.filter(|a| !a.is_empty()).map(|a| a.to_string()),
         )),
         "provider" | "login" => Some(Command::ChangeProvider),
@@ -487,6 +502,14 @@ mod tests {
             Some(Command::Mode(Some(_)))
         ));
         assert!(matches!(
+            parse("/expand full", &skills),
+            Some(Command::Expand(Some(ref arg))) if arg == "full"
+        ));
+        assert!(matches!(
+            parse("/expand", &skills),
+            Some(Command::Expand(None))
+        ));
+        assert!(matches!(
             parse("/resume", &skills),
             Some(Command::Resume(None))
         ));
@@ -502,7 +525,9 @@ mod tests {
     #[test]
     fn completion_spacing_matches_argument_commands() {
         let skills = SkillCatalog::from_dirs(&crate::paths::default_skill_dirs());
-        for cmd in ["/compact", "/model", "/variant", "/mode", "/resume"] {
+        for cmd in [
+            "/compact", "/model", "/variant", "/mode", "/expand", "/resume",
+        ] {
             assert!(completion_inserts_space(cmd, &skills));
         }
 
@@ -520,6 +545,7 @@ mod tests {
             Command::Info,
             Command::Skills,
             Command::Controls,
+            Command::Expand(Some("full".to_string())),
             Command::Exit,
             Command::Resume(None),
         ] {

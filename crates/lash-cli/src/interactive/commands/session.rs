@@ -451,9 +451,102 @@ pub(super) fn handle_skills(app: &mut App) -> anyhow::Result<bool> {
     Ok(false)
 }
 
+/// Human label for an expansion level, matching the `/expand` arguments.
+fn expand_level_label(level: u8) -> &'static str {
+    match level {
+        0 => "compact",
+        1 => "normal",
+        _ => "full",
+    }
+}
+
+const EXPAND_USAGE: &str =
+    "Usage: `/expand compact|normal|full` (Ctrl+O cycles compact/normal, Alt+O toggles full)";
+
+/// Map a `/expand` argument to an expansion level. Numeric synonyms match
+/// the internal levels so `/expand 2` and `/expand full` agree.
+fn parse_expand_level(argument: &str) -> Result<u8, String> {
+    match argument.trim().to_ascii_lowercase().as_str() {
+        "compact" | "0" => Ok(0),
+        "normal" | "1" => Ok(1),
+        "full" | "2" => Ok(2),
+        other => Err(format!(
+            "Unknown expansion level `{other}`.\n{EXPAND_USAGE}"
+        )),
+    }
+}
+
+pub(super) fn handle_expand(argument: Option<String>, app: &mut App) -> anyhow::Result<bool> {
+    let Some(argument) = argument else {
+        push_system_message(
+            app,
+            format!(
+                "Current expansion: `{}`\n{EXPAND_USAGE}",
+                expand_level_label(app.expand_level)
+            ),
+        );
+        return Ok(false);
+    };
+    let level = match parse_expand_level(&argument) {
+        Ok(level) => level,
+        Err(message) => {
+            push_system_message(app, message);
+            return Ok(false);
+        }
+    };
+    app.set_expand_level(level);
+    push_system_message(
+        app,
+        format!("Expansion set to `{}`.", expand_level_label(level)),
+    );
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expand_argument_accepts_names_and_numeric_synonyms() {
+        for (argument, level) in [
+            ("compact", 0),
+            ("normal", 1),
+            ("full", 2),
+            ("0", 0),
+            ("1", 1),
+            ("2", 2),
+            ("  FULL  ", 2),
+        ] {
+            assert_eq!(
+                parse_expand_level(argument),
+                Ok(level),
+                "argument {argument}"
+            );
+        }
+    }
+
+    #[test]
+    fn expand_argument_rejects_junk_with_usage() {
+        let error = parse_expand_level("everything").expect_err("junk must be rejected");
+        assert!(
+            error.contains("Unknown expansion level `everything`"),
+            "got {error}",
+        );
+        assert!(error.contains("/expand compact|normal|full"), "got {error}");
+        assert!(error.contains("Alt+O"), "got {error}");
+        assert!(parse_expand_level("3").is_err());
+    }
+
+    #[test]
+    fn expand_level_labels_match_arguments() {
+        for level in [0u8, 1, 2] {
+            assert_eq!(
+                parse_expand_level(expand_level_label(level)),
+                Ok(level),
+                "label round-trip for {level}",
+            );
+        }
+    }
 
     #[test]
     fn fork_fallback_message_uses_resume_id_command() {

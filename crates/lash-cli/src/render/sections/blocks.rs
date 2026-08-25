@@ -178,11 +178,14 @@ fn render_block_into(
             render_section_panel_block(&panel.title, &panel.content, lines, viewport_width);
         }
         UiTimelineItem::LashlangCode(code) => {
-            // Only shown at full expansion (Alt+O). At lower levels the
-            // block contributes zero lines — its tool activities carry
-            // the visible story already.
+            // The source itself is only shown at full expansion (Alt+O) —
+            // the tool activities carry the visible story already. Below
+            // that it collapses to a single dim marker row so the reader
+            // can see the code exists and which key reveals it.
             if expand_level >= 2 {
                 render_lashlang_code_block(code, lines, viewport_width);
+            } else {
+                render_collapsed_code_stub(code, app.rlm_dialect_label.as_deref(), lines);
             }
         }
         UiTimelineItem::Splash => {
@@ -256,6 +259,22 @@ fn collapsed_error_line(line: &str, char_truncated: &mut bool) -> String {
 /// Render the captured `lashlang` source for an RLM turn, with a dim `╎`
 /// gutter to mark it as "what the model ran" (distinct from the `│`
 /// shell gutter and `┊` reasoning gutter).
+/// One dim row standing in for a hidden code block: glyph column, the
+/// session's RLM dialect (or the neutral `code` when the dialect isn't
+/// known here), the line count, and the key that reveals the source.
+fn render_collapsed_code_stub(code: &str, dialect: Option<&str>, lines: &mut Vec<Line<'static>>) {
+    let dialect = dialect.unwrap_or("code");
+    let line_count = code.lines().count();
+    let unit = if line_count == 1 { "line" } else { "lines" };
+    lines.push(Line::from(vec![
+        Span::styled("◇ ", theme::text_faint_style()),
+        Span::styled(
+            format!("{dialect} · {line_count} {unit} — Alt+O to expand"),
+            theme::text_faint_style(),
+        ),
+    ]));
+}
+
 fn render_lashlang_code_block(code: &str, lines: &mut Vec<Line<'static>>, _viewport_width: usize) {
     let header_style = theme::code_chrome();
     let gutter_style = theme::code_chrome();
