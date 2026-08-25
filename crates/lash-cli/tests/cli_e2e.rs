@@ -433,6 +433,58 @@ fn cli_rlm_typescript_status_and_resume_conflict_are_pinned() {
 }
 
 #[test]
+fn cli_rlm_typescript_catalog_sync_failure_is_reported_at_most_once() {
+    let lash_home = test_lash_home("rlm-typescript-smoke");
+    let mut harness = start_interactive_harness_with_dialect(
+        &lash_home,
+        ExecutionMode::Rlm,
+        Some("typescript"),
+        None,
+    );
+
+    for (prompt, response) in [
+        ("First TypeScript turn", "■ typescript-ok-1"),
+        ("Second TypeScript turn", "■ typescript-ok-2"),
+    ] {
+        harness.send_line(prompt).expect("send TypeScript prompt");
+        harness
+            .wait_for_text_while_idle(response, Duration::from_secs(45))
+            .expect("wait for completed TypeScript turn");
+    }
+
+    let run = harness.finish_cleanly().expect("finish TypeScript harness");
+    assert_eq!(
+        run.screen_text.matches("■ typescript-ok-").count(),
+        2,
+        "both TypeScript turns must complete normally\nscreen:\n{}",
+        run.screen_text
+    );
+    let trace: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&run.artifacts.ui_trace_json).expect("read TypeScript UI trace"),
+    )
+    .expect("parse TypeScript UI trace");
+    let catalog_sync_notices = trace["ops"]
+        .as_array()
+        .expect("UI trace ops")
+        .iter()
+        .filter(|op| {
+            op["op"] == "system_message"
+                && op["text"]
+                    .as_str()
+                    .is_some_and(|text| text.to_ascii_lowercase().contains("tool catalog"))
+        })
+        .count();
+    // lash-cli issue #9: tighten this assertion to zero once the Lash pin includes the
+    // upstream dialect-preservation fix.
+    assert!(
+        catalog_sync_notices <= 1,
+        "catalog-sync failure notice rendered {catalog_sync_notices} times\ntrace: {}\nscreen:\n{}",
+        run.artifacts.ui_trace_json.display(),
+        run.screen_text
+    );
+}
+
+#[test]
 fn cli_interactive_pty_rlm_uses_temporary_working_directory() {
     let workspace = tempfile::tempdir().expect("temp workspace");
     let lash_home = test_lash_home("rlm-workspace-smoke");

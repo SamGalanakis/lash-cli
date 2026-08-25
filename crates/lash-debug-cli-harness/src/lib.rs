@@ -228,6 +228,12 @@ impl LiveHarness {
         self.wait_until(needle, timeout, |visible| visible.contains(needle))
     }
 
+    pub fn wait_for_text_while_idle(&mut self, needle: &str, timeout: Duration) -> Result<String> {
+        self.wait_until(needle, timeout, |visible| {
+            visible.contains(needle) && visible_run_state_is_idle(visible)
+        })
+    }
+
     pub fn wait_idle(&mut self, timeout: Duration) -> Result<String> {
         self.wait_settled_idle(timeout)
     }

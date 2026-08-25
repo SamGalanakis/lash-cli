@@ -2,6 +2,7 @@ use super::*;
 
 impl App {
     pub fn clear(&mut self) {
+        self.reset_automatic_tool_catalog_sync();
         self.timeline = Vec::new().into();
         self.scroll_offset = 0;
         self.follow_mode = FollowOutputMode::PinnedBottom;

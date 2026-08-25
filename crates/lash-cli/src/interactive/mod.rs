@@ -364,11 +364,15 @@ pub(crate) async fn run_app(
                         active_stream_id,
                         "runtime return received in interactive loop"
                     );
-                    if let Err(err) = sync_runtime_tool_catalog(&mut runtime).await {
-                        push_system_message(
-                            &mut app,
-                            format!("Failed to sync tool catalog after turn: {err}"),
-                        );
+                    if app.should_automatically_sync_tool_catalog() {
+                        let result = sync_runtime_tool_catalog(&mut runtime).await;
+                        app.observe_automatic_tool_catalog_sync_result(&result);
+                        if result.is_err() {
+                            push_system_message(
+                                &mut app,
+                                "Tool catalog could not be refreshed; automatic refresh is disabled for this session.",
+                            );
+                        }
                     }
                     if done.stream_id != active_stream_id || pending_clear_after_return {
                         if let Some(rt) = runtime.as_mut() {
@@ -385,6 +389,7 @@ pub(crate) async fn run_app(
                         app.usage.token_usage = TokenUsage::default();
                         app.stop_turn();
                         app.clear_mode_indicators();
+                        app.reset_automatic_tool_catalog_sync();
                         app.set_model_variant(current_model_variant.clone());
                         runtime_return_rx = None;
                         cancel_token = None;

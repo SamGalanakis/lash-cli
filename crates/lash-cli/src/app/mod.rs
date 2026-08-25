@@ -1,4 +1,5 @@
 mod cache;
+mod catalog_sync;
 mod input;
 mod live;
 mod projection;
@@ -617,6 +618,8 @@ pub struct App {
     pub execution_mode_label: String,
     /// Pinned RLM dialect for the active session, when applicable.
     pub rlm_dialect_label: Option<String>,
+    /// Failure latch for automatic post-turn catalog refreshes in this session.
+    automatic_tool_catalog_sync: catalog_sync::AutomaticToolCatalogSyncState,
     /// Unique session name (e.g. "alpine-canyon").
     pub session_name: String,
     /// Live session id (UUID) for the active runtime. Updated on resume
@@ -894,6 +897,7 @@ impl App {
             model_variant: Default::default(),
             execution_mode_label: "standard".to_string(),
             rlm_dialect_label: None,
+            automatic_tool_catalog_sync: Default::default(),
             session_name,
             session_id,
             repo_status: std::env::current_dir()

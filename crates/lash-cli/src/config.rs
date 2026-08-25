@@ -566,14 +566,17 @@ fn rlm_typescript_smoke_provider() -> lash::testing::TestProvider {
                 "scenario": "rlm-typescript-smoke",
             })
         })
-        .complete(|_request| async move {
-            let response = r#"<typescript>
-finish("typescript-ok");
-</typescript>"#;
+        .complete(|request| async move {
+            let result = if request_contains_text(&request, "Second TypeScript turn") {
+                "typescript-ok-2"
+            } else {
+                "typescript-ok-1"
+            };
+            let response = format!("<typescript>\nfinish(\"{result}\");\n</typescript>");
             Ok(lash::provider::LlmResponse {
-                full_text: response.to_string(),
+                full_text: response.clone(),
                 parts: vec![lash::direct::LlmOutputPart::Text {
-                    text: response.to_string(),
+                    text: response,
                     response_meta: None,
                 }],
                 ..Default::default()

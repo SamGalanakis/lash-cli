@@ -34,6 +34,7 @@ async fn activate_opened_session(
     provider: &ProviderHandle,
 ) -> Result<(), String> {
     *runtime = Some(opened.session);
+    app.reset_automatic_tool_catalog_sync();
     *logger = opened.logger;
     resume::load_resumed_session(
         opened.bootstrap.filename(),
@@ -135,6 +136,7 @@ pub(super) async fn handle_clear(
         .fresh(policy, *current_execution_mode, new_rlm_dialect)
         .await?;
     *runtime = Some(opened.session);
+    app.reset_automatic_tool_catalog_sync();
     *logger = opened.logger;
     let Some(session) = runtime.as_ref() else {
         return Err(anyhow::anyhow!("opened session was not installed"));
