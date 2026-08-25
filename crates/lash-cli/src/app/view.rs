@@ -16,6 +16,11 @@ impl App {
         self.clear_pending_turn_input_snapshot();
         self.overlay = None;
         self.activity_state.reset();
+        self.ui_activity_journal = UiActivityJournal::default();
+        self.pending_ui_activity_records.clear();
+        self.active_ui_turn_ordinal = None;
+        self.next_lashlang_block_ordinal = 0;
+        self.lashlang_block_anchors.clear();
         self.usage.token_usage = TokenUsage::default();
         self.usage.last_response_usage = TokenUsage::default();
         self.usage.last_prompt_usage = None;
@@ -518,5 +523,27 @@ mod tests {
             "scroll offset {} exceeds max scroll {max_scroll} after collapsing",
             app.scroll_offset,
         );
+    }
+
+    #[test]
+    fn clear_drops_previous_session_activity_journal() {
+        let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
+        let activity = ActivityBlock::new(
+            ActivityKind::ShellCommand,
+            "bash",
+            serde_json::json!({ "command": "nproc" }),
+            "nproc",
+            ActivityStatus::Completed,
+            serde_json::json!({ "output": "16\n" }),
+            5,
+        );
+        app.journal_lashlang_activity(Some((0, 0)), &activity);
+        assert!(!app.ui_activity_journal.is_empty());
+        assert!(!app.pending_ui_activity_records().is_empty());
+
+        app.clear();
+
+        assert!(app.ui_activity_journal.is_empty());
+        assert!(app.pending_ui_activity_records().is_empty());
     }
 }
