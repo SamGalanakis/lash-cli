@@ -6,8 +6,10 @@
 
 **Purpose.** Prove the CLI process dock's contract: a **Runtime Process** shows in the dock
 (header `Background`), the focused process can be cancelled (`Delete`), and — the invariant
-— **ending or deleting a session never ends a process by itself**. Only runtime processes
-appear in the dock; a subagent spawn does not.
+— **ending or deleting a session never ends a process by itself**. The dock uniformly
+reflects the session's durable process registry (`session.processes().list()`): a subagent
+spawn appears as a transient `subagent` row while it runs (plus a short post-completion
+retention window), then is pruned.
 
 **Why this matters.** The Lash repository's CONTEXT.md → "Runtime Process" says its
 lifecycle is independent of any session and only runtime processes appear in the CLI
@@ -23,10 +25,11 @@ by dry-run against every deterministic scenario:
   /fork /tree /version /info /model /variant /mode /provider /logout /retry /resume /skills
   /help /exit` (`crates/lash-cli/src/command.rs`). The dock is a render surface fed by
   `session.processes().list()`, not a command.
-- The RLM `rlm-subagent-smoke` scenario **does** spawn a subagent, but it renders as an
-  **inline tool activity** — `◆ spawn subagent · …` with footer `Running tool ·
-  spawn_agent` — and the `Background` dock header never appears. A subagent is not a dock
-  Runtime Process (consistent with the contract: "Only runtime processes appear").
+- The RLM `rlm-subagent-smoke` scenario **does** spawn a subagent. It renders **both** as
+  an inline tool activity — `◆ spawn subagent · …` with footer `Running tool ·
+  spawn_agent` — and as a transient `Background` dock row (`◆ running · subagent · spawn`)
+  backed by a durable `processes.db` record, pruned shortly after completion. It is not a
+  long-lived Runtime Process: it cannot witness the deletion invariant.
 - The deterministic test provider only returns canned responses, so no scenario leaves a
   durable Runtime Process running; the dock stays empty (`app.processes.is_empty()` →
   `crates/lash-cli/src/render/sections/docks.rs` draws nothing). A **Process Engine** that
