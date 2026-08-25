@@ -54,13 +54,13 @@ expect 10 Started new session
 ```
 
 You are now in an **empty** session (call it B) with the non-empty session A persisted. Read
-B's on-disk identity before rolling past it — open `/info` and record the `session db`
-path's basename (`<B>.db`) from the **Paths** section:
+B's catalog identity before rolling past it — open `/info` and record `session id: <B>`
+from the **Session** section:
 
 ```
 type /info
 key enter
-expect 10 session db
+expect 10 session id
 screen 40
 key esc
 ```
@@ -95,25 +95,26 @@ violation → Abort/RCA.
 
 ## Phase 3 — Direct-target escape hatch
 
-Target the hidden empty session B directly by its `.db` filename (from Phase 1):
+Target the hidden empty session B directly by its catalog id (from Phase 1):
 
 ```
 clear
-type /resume <B>.db
+type /resume <B>
 key enter
-expect 10 Resumed: <B>.db
+expect 10 Resumed: <B>
 ```
 
-Gate: `Resumed: <B>.db` — the picker suppressed B, but the direct form reached it.
+Gate: `Resumed: <B>` — the picker suppressed B, but the direct form reached it.
 
 **Rigor (contract check on the identifier surface).** CONTEXT.md → "Operator UI" and
 `docs/index.html` present `/resume <id-or-name>` as accepting the session **id or
-human-readable name** too, not only the `.db` filename. As a rigor case, also drive
+human-readable name**. As a rigor case, also drive
 `/resume <B-session-name>` (the `name` shown by `/info`). If it returns `Could not resolve
 session ...`, that is a divergence between the documented identifier surface and the CLI —
 **report it as a finding** (RCA it to the resume-identifier resolution path), and do **not**
-edit the doc or code to hide it. Filename resolution passing is the escape-hatch gate;
-name/id resolution is the rigor case.
+edit the doc or code to hide it. Catalog-id resolution is the escape-hatch gate; name
+resolution is the rigor case. Legacy per-session database filename targets are intentionally
+refused.
 
 ## Phase 4 — Only-empty store
 
@@ -147,7 +148,7 @@ thing to resume. Then `kill`.
 |------|----------------|---------|-------|
 | Hides empty when non-empty exists | `Resume Session (1/1)`, only `hello from pty`, no `No messages yet` |  |  |
 | Current session excluded | current session absent from the list |  |  |
-| Direct target reaches hidden session | `Resumed: <B>.db` |  |  |
+| Direct target reaches hidden session | `Resumed: <B>` |  |  |
 | Only-empty shows all | every row `No messages yet` |  |  |
 | Identifier surface (rigor) | name/id resolves, or reported as a doc/CLI divergence |  |  |
 

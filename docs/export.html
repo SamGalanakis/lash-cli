@@ -167,7 +167,7 @@
           <ol class="principle-list">
             <li>
               <h3>Tree discovery</h3>
-              <p>Given a root <code>.db</code> path and a trace JSONL, <code>tree::load_tree_from_paths</code> scans the sessions directory, keeps every child store reachable through <code>parent_session_id</code> chains, and partitions <code>LlmPromptSnapshot</code>s by <code>context.session_id</code>. Child sessions are classified from persisted <code>SessionRelation::Child</code> metadata and anchored back to the parent's <code>spawn_agent</code> tool call when possible. <code>continue_as</code> no longer participates in tree discovery because its AgentFrame records live inside the same session store.</p>
+              <p>Given the unified store root, a root session id, and a trace JSONL, <code>tree::load_tree_from_paths</code> enumerates the durable session catalog, keeps every child reachable through persisted parent relationships, and partitions <code>LlmPromptSnapshot</code>s by <code>context.session_id</code>. Session content is opened read-only; the narrowly retained mutable metadata path supplies the full child relation needed to anchor a child back to its parent's <code>spawn_agent</code> tool call. <code>continue_as</code> never participates in tree discovery because its AgentFrame records live inside the same session.</p>
             </li>
             <li>
               <h3>View topology</h3>

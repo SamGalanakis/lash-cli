@@ -12,7 +12,9 @@
 - `Ctrl+P` opens the command and settings palette — a searchable overlay of settings actions (theme, model, variant, and other commands) applied directly without typing a slash command.
 - The status bar shows model and reasoning variant joined, then execution mode and the pinned RLM dialect when applicable, for example `gpt-5.5 medium · rlm · typescript`; it carries no `lash` brand prefix. Context usage is labeled as `ctx`.
 - Queue previews sit directly above the input. Early-injected work is labeled `Will send in this turn`; next-turn work is labeled `Queued for next turn`.
-- The `/resume` picker hides zero-turn sessions when any non-empty session exists. If only empty sessions exist it shows them with `No messages yet`; direct `/resume <id-or-name>` may still target any session. Alpha-era per-session databases add the notice `N sessions from an older Lash are not openable` and are never opened.
+- Escape during an active turn durably cancels that exact turn with dropped-input disposition, restores affected steer text ahead of the current editor draft, and never replays it automatically on a later turn. A resumed session surfaces any dropped text that could not be restored before exit as a system message.
+- The `/resume` picker discovers live root sessions from Lash's unified catalog and uses the host roster only for display metadata. It hides zero-turn sessions when any non-empty session exists. If only empty sessions exist it shows them with `No messages yet`; catalog-only sessions receive fallback labels, and direct `/resume <id-or-name>` may still target any session. Alpha-era per-session databases add the notice `N sessions from an older Lash are not openable` and are never opened.
+- The current durable compatibility markers are session schema 41, trace schema 9, and remote protocol 46. `lash --version` and `/info` report these markers.
 
 ## Autonomous CLI Testing
 
