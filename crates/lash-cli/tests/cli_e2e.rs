@@ -166,7 +166,8 @@ fn cli_interactive_pty_active_steer_escape_restores_editor_without_replay() {
     assert!(
         restored_screen.contains("Manually interrupted.")
             && restored_screen.contains("queued after escape")
-            && !restored_screen.contains("test-provider echo: queued after escape"),
+            && !restored_screen.contains("test-provider echo: queued after escape")
+            && !restored_screen.contains("Queued for next turn"),
         "screen should show the interrupted turn and restored, unsent steer\nscreen:\n{restored_screen}"
     );
     harness

@@ -259,6 +259,13 @@ fn restore_cancelled_input_texts(
     session_id: &str,
     outcome: &lash::TurnCancelInputOutcome,
 ) {
+    let dropped_input_ids = outcome
+        .affected_inputs
+        .iter()
+        .filter(|input| matches!(input.disposition, lash::TurnCancelDisposition::Drop))
+        .map(|input| input.input_id.clone())
+        .collect::<Vec<_>>();
+    app.remove_pending_turn_inputs(&dropped_input_ids);
     let texts = cancelled_input_texts(outcome);
     let Some(restored) = prepend_cancelled_input_texts(app.input(), &texts) else {
         return;
