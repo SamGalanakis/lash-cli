@@ -79,14 +79,16 @@ conversation` must be gone.)
 **Rung 2 — cancel the active turn.** The turn commits to its interrupted terminal state.
 
 ```
+clear
 key ctrl-c
-expect 20 Manually interrupted
+expect 20 Manually interrupted.
 expect 10 Idle
 ```
 
-Gate: `Manually interrupted.` renders and the footer returns to `Idle`. A turn that keeps
-running, or errors instead of interrupting, → Abort/RCA (turn cancel). The `/` draft still
-survives.
+Gate: after clearing the startup capture, `Manually interrupted.` renders and the footer
+returns to `Idle`; the `Idle` match therefore belongs to this cancellation rung rather than
+the initial frame. A turn that keeps running, or errors instead of interrupting, → Abort/RCA
+(turn cancel). The `/` draft still survives.
 
 **Rung 3 — clear the non-empty draft.** The `/` draft is discarded; the idle placeholder
 returns.
@@ -118,7 +120,7 @@ gate. A *clean* exit here is the expected outcome of this rung, not an Abort tri
 | Item | Objective gate | Verdict | Notes |
 |------|----------------|---------|-------|
 | Rung 1: suggestion closes | popup + `Reset conversation` gone; `/` draft + `Thinking` survive |  |  |
-| Rung 2: active turn cancels | `Manually interrupted.` + footer `Idle` |  |  |
+| Rung 2: active turn cancels | post-`clear` `Manually interrupted.` + footer `Idle` |  |  |
 | Rung 3: draft clears | `❯ Message · / for commands` returns; process still alive |  |  |
 | Rung 4: quit from idle empty | child exits `0` |  |  |
 | Order held | exactly four presses, one rung each, none out of order |  |  |

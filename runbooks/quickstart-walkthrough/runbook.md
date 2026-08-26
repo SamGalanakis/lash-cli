@@ -50,7 +50,7 @@ and `Cargo.toml` exist there; confirm the operator exists in this repository.
 | # | Page claim | Gate | Expected |
 |---|-----------|------|----------|
 | 1 | Crate is published as `lash-runtime`; the Rust import stays `use lash::...` | Lash repository `Cargo.toml` alias | `lash = { package = "lash-runtime", … }` |
-| 2 | The "Minimal Example" code (`standard_builder → provider → model(from_token_limits) → effect_host(InlineEffectHost) → attachment_store(InMemoryAttachmentStore) → build`; `core.session(..).open()`; `session.turn(TurnInput::text(..)).run()`; `result.assistant_message()`) | In the Lash repository, `python3 scripts/lint_docs.py` (the page's `data-snippet="quickstart#hello-lash"` is diffed against `examples/docs-snippets/src/quickstart.rs`) and the snippet crate's compile check against the pinned façade | `docs lint: ok`; snippet compiles against the pinned façade API |
+| 2 | The "Minimal Example" code (`standard_builder(TurnBudget::bounded(..)) → provider → model → effect_host(InlineEffectHost) → attachment_store(InMemoryAttachmentStore) → process_env_store(InMemoryProcessExecutionEnvStore) → commit_budget → queued_work_batching → build`; `core.session(..).open()`; `session.turn(TurnInput::text(..)).run()`; `result.assistant_message()`) | In the Lash repository, `python3 scripts/lint_docs.py` (the page's `data-snippet="quickstart#hello-lash"` is diffed against `examples/docs-snippets/src/quickstart.rs`) and the snippet crate's compile check against the pinned façade | `docs lint: ok`; snippet compiles against the pinned façade API |
 
 Run `python3 scripts/lint_docs.py` in the Lash repository — a clean `docs lint: ok` is the
 objective gate that the snippet and page structure haven't drifted from the compiled

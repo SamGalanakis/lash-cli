@@ -54,13 +54,14 @@ expect 10 Started new session
 ```
 
 You are now in an **empty** session (call it B) with the non-empty session A persisted. Read
-B's catalog identity before rolling past it — open `/info` and record `session id: <B>`
-from the **Session** section:
+B's catalog identity before rolling past it: open `/info`, gate on the **Session** section,
+then record the separate `name <adjective-noun>` and `id <uuid>` rows:
 
 ```
 type /info
 key enter
-expect 10 session id
+expect 10 Session
+expect 10 id
 screen 40
 key esc
 ```
@@ -150,7 +151,7 @@ thing to resume. Then `kill`.
 | Current session excluded | current session absent from the list |  |  |
 | Direct target reaches hidden session | `Resumed: <B>` |  |  |
 | Only-empty shows all | every row `No messages yet` |  |  |
-| Identifier surface (rigor) | name/id resolves, or reported as a doc/CLI divergence |  |  |
+| Identifier surface (rigor) | `/info` renders `Session`, then separate `name <adjective-noun>` and `id <uuid>` rows |  |  |
 
 **Aggregate:** does the picker hide zero-turn sessions only when a non-empty exists, show
 `No messages yet` when only empties exist, exclude the current session, and does the direct
