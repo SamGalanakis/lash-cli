@@ -426,9 +426,13 @@ pub(crate) async fn run_app(
                         .usage_report()
                         .usage
                         .usage;
-                    let state = done.result.state;
+                    let rt = runtime
+                        .as_ref()
+                        .expect("runtime remains installed while a turn runs");
+                    let read_view = rt.read_view();
+                    let turn_input_applications = rt.turn_input_applications().await?;
                     tracing::info!(
-                        turn_index = state.turn_index,
+                        turn_index = read_view.turn_index(),
                         outcome = ?done.result.outcome,
                         assistant_chars = done.result.assistant_output.safe_text.len(),
                         "runtime turn completed"
@@ -456,15 +460,15 @@ pub(crate) async fn run_app(
                         }
                     }
 
-                    let read_view = state.read_view();
                     history = read_view.messages().to_vec();
-                    turn_counter = state.turn_index;
+                    turn_counter = read_view.turn_index();
                     app.usage.last_response_usage = completed_turn_usage;
                     app.usage.token_usage = session_usage;
-                    app.usage.last_prompt_usage = state.last_prompt_usage.clone();
+                    app.usage.last_prompt_usage = read_view.last_prompt_usage().cloned();
+                    app.reconcile_turn_input_applications(&turn_input_applications);
                     tracing::debug!(
                         stream_id = done.stream_id,
-                        turn_index = state.turn_index,
+                        turn_index = read_view.turn_index(),
                         outcome = ?done.result.outcome,
                         messages = read_view.messages().len(),
                         blocks = app.timeline.len(),

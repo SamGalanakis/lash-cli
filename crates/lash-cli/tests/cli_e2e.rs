@@ -139,6 +139,83 @@ fn cli_interactive_pty_smoke_runs_turn_and_exits() {
 }
 
 #[test]
+fn cli_interactive_pty_next_turn_is_visibly_executed_once() {
+    let lash_home = test_lash_home("standard-slow-echo");
+    let mut harness = start_interactive_harness(&lash_home, ExecutionMode::Standard, None);
+
+    harness
+        .send_line("slow initial prompt")
+        .expect("send slow initial prompt");
+    harness
+        .wait_for_text("Thinking", Duration::from_secs(10))
+        .expect("wait for slow turn to become active");
+    harness
+        .type_text("hold for next turn")
+        .expect("type queued next-turn input");
+    harness.press_key("Tab").expect("queue input for next turn");
+    harness
+        .wait_for_text("Queued for next turn", Duration::from_secs(10))
+        .expect("wait for queued next-turn preview");
+    harness
+        .wait_for_text(
+            "test-provider echo: hold for next turn",
+            Duration::from_secs(30),
+        )
+        .expect("wait for visible queued-turn response");
+
+    let run = harness.finish_cleanly().expect("finish harness");
+    let provider_requests = provider_request_visible_user_texts(lash_home.path());
+    assert_eq!(
+        provider_requests.len(),
+        2,
+        "queued next-turn input must produce exactly one additional provider request\nrequests:\n{provider_requests:#?}\nscreen:\n{}",
+        run.screen_text
+    );
+    assert_eq!(
+        provider_requests[1].last().map(String::as_str),
+        Some("hold for next turn"),
+        "request 2 must end with the queued next-turn input\nrequests:\n{provider_requests:#?}"
+    );
+    assert!(
+        run.screen_text.contains("● hold for next turn")
+            && run
+                .screen_text
+                .contains("■ test-provider echo: hold for next turn"),
+        "queued user input and its assistant response must both be visible\nscreen:\n{}",
+        run.screen_text
+    );
+    let trace =
+        std::fs::read_to_string(&run.artifacts.ui_trace_json).expect("read queued-turn UI trace");
+    assert!(
+        !trace.contains("Tool catalog could not be refreshed"),
+        "queued-turn ownership must not break post-turn catalog sync\ntrace:\n{trace}"
+    );
+
+    let applications = settled_turn_input_applications(lash_home.path());
+    let queued_applications = applications
+        .iter()
+        .filter(|application| {
+            application
+                .source_key
+                .as_deref()
+                .is_some_and(|source_key| source_key.starts_with("host:"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        queued_applications.len(),
+        1,
+        "the queued next-turn input must end completed in one durable turn application\napplications:\n{applications:#?}"
+    );
+    assert!(
+        queued_applications[0]
+            .turn_id
+            .as_str()
+            .starts_with("cli-queue-drain:"),
+        "the CLI-owned queued-turn path must commit the queued input\napplications:\n{applications:#?}"
+    );
+}
+
+#[test]
 fn cli_interactive_pty_active_steer_escape_restores_editor_without_replay() {
     let lash_home = test_lash_home("standard-gated-escape");
     let mut harness = start_interactive_harness(&lash_home, ExecutionMode::Standard, None);
@@ -658,6 +735,45 @@ fn provider_request_visible_user_texts(lash_home: &std::path::Path) -> Vec<Vec<S
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+fn settled_turn_input_applications(lash_home: &std::path::Path) -> Vec<lash::TurnInputApplication> {
+    use lash::persistence::SessionStoreFactory as _;
+
+    let session_id = std::fs::read_dir(lash_home.join("sessions"))
+        .expect("read session roster")
+        .filter_map(Result::ok)
+        .find_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_suffix(".ui.json"))
+                .map(str::to_string)
+        })
+        .expect("session roster entry");
+    let runtime = tokio::runtime::Runtime::new().expect("test inspection runtime");
+    let store_dir = lash_home.join("store");
+    let factory = lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(
+        &store_dir,
+        store_dir.join("processes.db"),
+    );
+    let read_view = runtime
+        .block_on(factory.open_read_only(&session_id))
+        .expect("open durable session read view")
+        .expect("durable session exists");
+    let store = runtime
+        .block_on(
+            factory.create_store(&lash::persistence::SessionStoreCreateRequest {
+                session_id: session_id.clone(),
+                relation: read_view.durable_relation().cloned().unwrap_or_default(),
+                pending_observer_intents: Vec::new(),
+                policy: read_view.policy().clone(),
+            }),
+        )
+        .expect("open durable session store");
+    runtime
+        .block_on(store.list_turn_input_applications(&session_id))
+        .expect("read settled turn-input applications")
 }
 
 fn screen_cell_for(screen: &str, needle: &str) -> Option<(u16, u16)> {

@@ -83,6 +83,7 @@ pub(crate) struct CliSessionOpener {
     deferred_tool_resolver: Option<lash::tools::SharedDeferredToolResolver>,
     trace_jsonl_path: Option<PathBuf>,
     trace_level: lash::tracing::TraceLevel,
+    owns_visible_queued_turns: bool,
     opened_cores: Arc<tokio::sync::Mutex<Vec<LashCore>>>,
 }
 
@@ -161,6 +162,7 @@ impl CliSessionOpener {
         deferred_tool_resolver: Option<lash::tools::SharedDeferredToolResolver>,
         trace_jsonl_path: Option<PathBuf>,
         trace_level: lash::tracing::TraceLevel,
+        owns_visible_queued_turns: bool,
     ) -> Self {
         Self {
             plugin_stack,
@@ -170,6 +172,7 @@ impl CliSessionOpener {
             deferred_tool_resolver,
             trace_jsonl_path,
             trace_level,
+            owns_visible_queued_turns,
             opened_cores: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         }
     }
@@ -289,6 +292,9 @@ impl CliSessionOpener {
             .process_registry(process_registry)
             .trigger_store(trigger_store)
             .trace_level(self.trace_level);
+        if self.owns_visible_queued_turns {
+            builder = builder.disable_queued_work_driver();
+        }
         if let Some(trace_path) = self.trace_jsonl_path.clone() {
             builder = builder.trace_jsonl_path(trace_path);
         }
@@ -413,4 +419,27 @@ impl CliSessionOpener {
         self.open_prepared(bootstrap, fallback_policy, host_config)
             .await
     }
+}
+
+pub(crate) async fn refresh_tool_catalog_and_wait(
+    session: &LashSession,
+    reason: &str,
+    idempotency_key: &str,
+) -> Result<()> {
+    let receipt = session
+        .admin()
+        .commands()
+        .refresh_tool_catalog(reason, idempotency_key)
+        .await?;
+    let outcome = session
+        .queued_turn()
+        .batch_ids([receipt.batch_id.clone()])
+        .drain_id(receipt.batch_id)
+        .run()
+        .await?;
+    anyhow::ensure!(
+        !outcome.executed_selected_turn(),
+        "tool catalog refresh unexpectedly executed a model turn"
+    );
+    Ok(())
 }

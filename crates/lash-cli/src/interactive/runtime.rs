@@ -69,11 +69,13 @@ pub(super) async fn sync_runtime_tool_catalog(
     runtime: &mut Option<LashSession>,
 ) -> Result<(), String> {
     if let Some(rt) = runtime.as_mut() {
-        rt.admin()
-            .commands()
-            .refresh_tool_catalog("interactive sync", "interactive-sync-runtime-tools")
-            .await
-            .map_err(|err| err.to_string())?;
+        crate::startup::session::refresh_tool_catalog_and_wait(
+            rt,
+            "interactive sync",
+            "interactive-sync-runtime-tools",
+        )
+        .await
+        .map_err(|err| err.to_string())?;
     }
     Ok(())
 }

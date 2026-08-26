@@ -137,7 +137,10 @@ impl App {
         }
     }
 
-    fn accept_injected_turn_input(&mut self, applications: &[TurnInputApplication]) {
+    pub(crate) fn reconcile_turn_input_applications(
+        &mut self,
+        applications: &[TurnInputApplication],
+    ) {
         self.finalize_live_markdown();
         let mut accepted_user_message = false;
         let pending = self.pending_turn_input_snapshot().to_vec();
@@ -480,7 +483,7 @@ impl App {
                 }
             }
             TurnEvent::QueuedInputAccepted { applications } => {
-                self.accept_injected_turn_input(&applications);
+                self.reconcile_turn_input_applications(&applications);
             }
             TurnEvent::QueuedMessagesCommitted { messages, .. } => {
                 self.commit_injected_messages(&messages);

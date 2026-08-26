@@ -623,13 +623,22 @@ fn standard_slow_echo_provider() -> lash::testing::TestProvider {
         })
         .complete(|request| async move {
             record_test_provider_request("standard-slow-echo", &request);
-            let response = if request_contains_text(&request, "queued after escape") {
+            let last_user_text = request_visible_user_texts(&request)
+                .pop()
+                .unwrap_or_default();
+            let response = if last_user_text.contains("queued after escape") {
                 "test-provider echo: queued after escape"
-            } else if request_contains_text(&request, "slow initial prompt") {
+            } else if last_user_text.contains("slow initial prompt") {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 "test-provider echo: slow initial prompt"
             } else {
-                "test-provider echo: interactive prompt"
+                return Ok(lash::provider::LlmResponse {
+                    parts: vec![lash::direct::LlmOutputPart::Text {
+                        text: format!("test-provider echo: {last_user_text}"),
+                        response_meta: None,
+                    }],
+                    ..Default::default()
+                });
             };
             Ok(lash::provider::LlmResponse {
                 parts: vec![lash::direct::LlmOutputPart::Text {

@@ -561,6 +561,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         mcp_deferred_resolver,
         trace_path,
         trace_level,
+        !autonomous,
     );
     let session_bootstrap =
         session_bootstrap.expect("session bootstrap is opened for every non --info run");
@@ -629,10 +630,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     let initial_model_variant = initial_policy.model.variant.clone();
     let session_name = opened_session.bootstrap.session_name();
     let mut logger = opened_session.logger;
-    session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("bootstrap", "bootstrap-refresh-tool-catalog")
+    session::refresh_tool_catalog_and_wait(&session, "bootstrap", "bootstrap-refresh-tool-catalog")
         .await?;
     if rlm_projected_bindings.is_some() && args.print_prompt.is_none() {
         return Err(anyhow::anyhow!(

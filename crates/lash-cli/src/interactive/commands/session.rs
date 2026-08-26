@@ -54,12 +54,13 @@ async fn activate_opened_session(
         return Err("opened session was not installed".to_string());
     };
     app.set_rlm_dialect(current_rlm_dialect(runtime));
-    session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("interactive session open", "interactive-session-open")
-        .await
-        .map_err(|err| err.to_string())?;
+    crate::startup::session::refresh_tool_catalog_and_wait(
+        session,
+        "interactive session open",
+        "interactive-session-open",
+    )
+    .await
+    .map_err(|err| err.to_string())?;
     *active_tool_state = session
         .admin()
         .tools()
@@ -143,11 +144,12 @@ pub(super) async fn handle_clear(
     };
     app.set_rlm_dialect(current_rlm_dialect(runtime));
     if let Some(rt) = runtime.as_ref() {
-        rt.admin()
-            .commands()
-            .refresh_tool_catalog("interactive session switch", "interactive-session-switch")
-            .await
-            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        crate::startup::session::refresh_tool_catalog_and_wait(
+            rt,
+            "interactive session switch",
+            "interactive-session-switch",
+        )
+        .await?;
         let session_id = rt.session_id();
         app.session_id = session_id;
         *current_model_variant = crate::model_selection::variant_from_reasoning_selection(
