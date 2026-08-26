@@ -58,6 +58,7 @@ B's catalog identity before rolling past it: open `/info`, gate on the **Session
 then record the separate `name <adjective-noun>` and `id <uuid>` rows:
 
 ```
+clear
 type /info
 key enter
 expect 10 Session
