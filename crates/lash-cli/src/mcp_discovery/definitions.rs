@@ -1,47 +1,44 @@
-use lash_core::{ToolActivation, ToolDefinition, ToolScheduling};
-use lash_tool_support::{LashlangToolBinding, ToolDefinitionLashlangExt};
+//! Deferred MCP tool definitions.
+use lash::tools::{ToolActivation, ToolDefinition, ToolDefinitionBindingExt};
+use lash_tool_support::tool_binding;
 use serde_json::{Value, json};
 
-pub(crate) fn search_tools_definition() -> ToolDefinition {
-    #[derive(schemars::JsonSchema)]
-    #[allow(dead_code)]
-    struct SearchToolsArgs {
-        #[schemars(
-            description = "Concise tool search query. Prefer keywords and short intent phrases with the app/domain, action, object, qualifiers, and important fields; for multi-constraint tasks include every constraint, such as \"spotify liked songs library\"."
-        )]
-        query: String,
-        #[cfg(feature = "lashlang")]
-        #[schemars(description = "Optional module filter, such as \"appworld\" or \"web\".")]
-        module: Option<ModuleFilter>,
-        #[schemars(range(min = 1, max = 100))]
-        #[schemars(description = "Maximum number of results to return. Defaults to 10.")]
-        limit: Option<usize>,
-        #[schemars(description = "Exact tool name or names to exclude from results.")]
-        exclude: Option<NameFilter>,
-    }
-
-    #[derive(schemars::JsonSchema)]
-    #[allow(dead_code)]
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[allow(dead_code)]
+pub(crate) struct SearchToolsArgs {
+    #[schemars(
+        description = "Concise tool search query. Prefer keywords and short intent phrases with the app/domain, action, object, qualifiers, and important fields; for multi-constraint tasks include every constraint, such as \"spotify liked songs library\"."
+    )]
+    pub(crate) query: String,
     #[cfg(feature = "lashlang")]
-    #[serde(untagged)]
-    enum ModuleFilter {
-        One(String),
-        Many(Vec<String>),
-    }
+    #[schemars(description = "Optional module filter, such as \"appworld\" or \"web\".")]
+    pub(crate) module: Option<ModuleFilter>,
+    #[schemars(range(min = 1, max = 100))]
+    #[schemars(description = "Maximum number of results to return. Defaults to 10.")]
+    pub(crate) limit: Option<usize>,
+    #[schemars(description = "Exact tool name or names to exclude from results.")]
+    pub(crate) exclude: Option<NameFilter>,
+}
 
-    #[derive(schemars::JsonSchema)]
-    #[allow(dead_code)]
-    #[serde(untagged)]
-    enum NameFilter {
-        One(String),
-        Many(Vec<String>),
-    }
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[allow(dead_code)]
+#[cfg(feature = "lashlang")]
+#[serde(untagged)]
+pub(crate) enum ModuleFilter {
+    One(String),
+    Many(Vec<String>),
+}
 
-    let description = if cfg!(feature = "lashlang") {
-        "Search catalogued module capabilities, aliases, descriptions, signatures, return fields, and examples. Use this when the capability you need is only listed in the catalogued-capabilities preview or is too sparse to call confidently. Query with concise keywords and short intent phrases: include the app/domain, action, object, qualifiers, and important fields or constraints. For initial exploration, print only result call paths and signatures; inspect descriptions and examples only when you need to choose between close matches or learn call idioms."
-    } else {
-        "Search catalogued tools by name, id, description, signatures, return fields, and examples. Use this when the capability you need is only listed in the catalogued-capabilities preview or is too sparse to call confidently. Query with concise keywords and short intent phrases: include the app/domain, action, object, qualifiers, and important fields or constraints."
-    };
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+#[allow(dead_code)]
+#[serde(untagged)]
+pub(crate) enum NameFilter {
+    One(String),
+    Many(Vec<String>),
+}
+
+pub(crate) fn search_tools_definition() -> ToolDefinition {
+    let description = "Search catalogued capabilities, aliases, descriptions, signatures, return fields, and examples. Use this when the capability you need is only listed in the catalogued-capabilities preview or is too sparse to call confidently. Query with concise keywords and short intent phrases: include the app/domain, action, object, qualifiers, and important fields or constraints.";
 
     ToolDefinition::raw(
         "tool:search_tools",
@@ -50,18 +47,8 @@ pub(crate) fn search_tools_definition() -> ToolDefinition {
         schema_for::<SearchToolsArgs>(),
         search_tools_output_schema(),
     )
-    .with_examples(vec![
-        "await tools.search({ query: \"spotify liked songs library\" })?".into(),
-        "await tools.search({ query: \"spotify song details play_count genre title song_id\" })?"
-            .into(),
-        "await tools.search({ query: \"venmo send money private payment_card receiver_email\" })?"
-            .into(),
-    ])
     .with_activation(ToolActivation::Always)
-    .with_lashlang_binding(
-        LashlangToolBinding::new(["tools"], "search").with_aliases(["tool_search"]),
-    )
-    .with_scheduling(ToolScheduling::Serial)
+    .with_tool_binding(tool_binding(["tools"], "search", &["tool_search"]))
 }
 
 fn schema_for<T>() -> Value
@@ -120,7 +107,7 @@ fn search_tools_output_schema() -> Value {
             "call".to_string(),
             json!({
                 "type": "string",
-                "description": "Exact legal Lashlang module call path."
+                "description": "Exact callable module path for the active RLM dialect."
             }),
         );
         schema
@@ -161,7 +148,7 @@ mod tests {
         );
         #[cfg(feature = "lashlang")]
         assert!(
-            rendered_signature.contains("module?: str | list[str] | null"),
+            rendered_signature.contains("module?: list[str] | str | null"),
             "{rendered_signature}"
         );
         #[cfg(not(feature = "lashlang"))]
@@ -170,7 +157,7 @@ mod tests {
             "{rendered_signature}"
         );
         assert!(
-            rendered_signature.contains("exclude?: str | list[str] | null"),
+            rendered_signature.contains("exclude?: list[str] | str | null"),
             "{rendered_signature}"
         );
         assert!(

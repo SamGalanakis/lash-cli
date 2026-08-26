@@ -1,8 +1,8 @@
 use lash::CancellationToken;
+use lash::messages::Message;
+use lash::runtime::SessionPolicy;
+use lash::tools::ToolState;
 use lash::{LashSession, provider::ProviderHandle};
-use lash_core::session_model::Message;
-use lash_core::{SessionPolicy, ToolState};
-use lash_standard_plugins::StandardContextApproach;
 
 use crate::SkillCatalog;
 use crate::app::{App, UiTimelineItem};
@@ -34,6 +34,7 @@ async fn activate_opened_session(
     provider: &ProviderHandle,
 ) -> Result<(), String> {
     *runtime = Some(opened.session);
+    app.clear();
     *logger = opened.logger;
     resume::load_resumed_session(
         opened.bootstrap.filename(),
@@ -52,12 +53,14 @@ async fn activate_opened_session(
     let Some(session) = runtime.as_ref() else {
         return Err("opened session was not installed".to_string());
     };
-    session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("interactive session open", "interactive-session-open")
-        .await
-        .map_err(|err| err.to_string())?;
+    app.set_rlm_dialect(current_rlm_dialect(runtime));
+    crate::startup::session::refresh_tool_catalog_and_wait(
+        session,
+        "interactive session open",
+        "interactive-session-open",
+    )
+    .await
+    .map_err(|err| err.to_string())?;
     *active_tool_state = session
         .admin()
         .tools()
@@ -74,28 +77,31 @@ fn fallback_policy_for_session_switch(
     current_model_variant: &mut Option<String>,
     _current_execution_mode: &mut ExecutionMode,
 ) -> SessionPolicy {
-    let model = lash_core::ModelSpec::from_token_limits(
-        app.model.clone(),
-        crate::model_selection::reasoning_selection_from_variant(current_model_variant.clone()),
-        app.usage.context_window.unwrap_or(1) as usize,
-        None,
-    )
-    .unwrap_or_else(|_| lash_core::ModelSpec::default())
-    .with_capability(crate::capability_catalog::capability_for(
-        provider.kind(),
-        &app.model,
-    ));
-    SessionPolicy {
-        provider_id: provider.kind().to_string(),
-        model,
-        ..SessionPolicy::default()
-    }
+    let model = lash::ModelSpec::builder(app.model.clone())
+        .variant(crate::model_selection::reasoning_selection_from_variant(
+            current_model_variant.clone(),
+        ))
+        .context_window_tokens(app.usage.context_window.unwrap_or(1) as usize)
+        .build()
+        .unwrap_or_else(|_| lash::ModelSpec::default())
+        .with_capability(crate::capability_catalog::capability_for(
+            provider.kind(),
+            &app.model,
+        ));
+    let mut policy = SessionPolicy::new(crate::host_policy::turn_budget());
+    policy.provider_id = provider.kind().to_string();
+    policy.model = model;
+    policy.no_progress_budget = crate::host_policy::no_progress_budget();
+    policy
 }
 
-fn fallback_standard_context_approach(
-    current_execution_mode: &ExecutionMode,
-) -> Option<StandardContextApproach> {
-    (current_execution_mode == &ExecutionMode::Standard).then(StandardContextApproach::default)
+pub(super) fn current_rlm_dialect(
+    runtime: &Option<LashSession>,
+) -> Option<crate::execution_settings::RlmDialect> {
+    use lash::rlm::RlmSessionExt as _;
+    runtime
+        .as_ref()
+        .and_then(|session| session.rlm_config().dialect)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -111,6 +117,7 @@ pub(super) async fn handle_clear(
     provider: &ProviderHandle,
     current_model_variant: &mut Option<String>,
     current_execution_mode: &mut ExecutionMode,
+    new_rlm_dialect: Option<crate::execution_settings::RlmDialect>,
     active_tool_state: &mut ToolState,
     pending_clear_after_return: &mut bool,
 ) -> anyhow::Result<bool> {
@@ -127,23 +134,22 @@ pub(super) async fn handle_clear(
         current_execution_mode,
     );
     let opened = runtime_factory
-        .fresh(
-            policy,
-            *current_execution_mode,
-            fallback_standard_context_approach(current_execution_mode),
-        )
+        .fresh(policy, *current_execution_mode, new_rlm_dialect)
         .await?;
     *runtime = Some(opened.session);
+    app.clear();
     *logger = opened.logger;
     let Some(session) = runtime.as_ref() else {
         return Err(anyhow::anyhow!("opened session was not installed"));
     };
+    app.set_rlm_dialect(current_rlm_dialect(runtime));
     if let Some(rt) = runtime.as_ref() {
-        rt.admin()
-            .commands()
-            .refresh_tool_catalog("interactive session switch", "interactive-session-switch")
-            .await
-            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        crate::startup::session::refresh_tool_catalog_and_wait(
+            rt,
+            "interactive session switch",
+            "interactive-session-switch",
+        )
+        .await?;
         let session_id = rt.session_id();
         app.session_id = session_id;
         *current_model_variant = crate::model_selection::variant_from_reasoning_selection(
@@ -155,7 +161,6 @@ pub(super) async fn handle_clear(
     history.clear();
     *turn_counter = 0;
     *last_turn = None;
-    app.clear();
     app.set_model_variant(current_model_variant.clone());
     app.set_execution_mode_label(current_execution_mode);
     app.timeline.push(UiTimelineItem::SystemMessage(format!(
@@ -179,6 +184,7 @@ pub(super) async fn handle_retry(
     current_execution_mode: &mut ExecutionMode,
     toolset_hash: &mut String,
     app_tx: &crate::event::AppEventTx,
+    _runtime_factory: &CliSessionOpener,
 ) -> anyhow::Result<bool> {
     if let Some(previous) = last_turn.clone() {
         let definitions = match runtime.as_ref() {
@@ -216,24 +222,12 @@ pub(super) async fn handle_retry(
 
 pub(super) async fn handle_fork(
     app: &mut App,
+    runtime_factory: &CliSessionOpener,
     logger: &mut SessionLogger,
     runtime: &mut Option<LashSession>,
-    provider: &ProviderHandle,
-    current_model_variant: &Option<String>,
     _toolset_hash: &str,
 ) -> anyhow::Result<bool> {
-    match fork::fork_current_session(
-        runtime.as_ref(),
-        logger,
-        provider,
-        &app.model,
-        app.usage
-            .context_window
-            .expect("app context_window must be set before forking"),
-        current_model_variant.as_deref(),
-    )
-    .await
-    {
+    match fork::fork_current_session(runtime.as_ref(), runtime_factory, logger, &app.model).await {
         Ok(forked) => {
             let fallback_command = fork_resume_command(&forked.session_id);
             let exe = match fork::resolve_resume_executable() {
@@ -341,7 +335,7 @@ pub(crate) async fn switch_to_session_identifier(
             identifier,
             policy,
             *current_execution_mode,
-            fallback_standard_context_approach(current_execution_mode),
+            current_rlm_dialect(runtime),
         )
         .await?;
     activate_opened_session(
@@ -359,9 +353,14 @@ pub(crate) async fn switch_to_session_identifier(
     )
     .await
     .map_err(anyhow::Error::msg)?;
-    *toolset_hash = hash12(
-        &serde_json::to_vec(&active_tool_state.tool_manifests()).unwrap_or_else(|_| b"[]".to_vec()),
-    );
+    let manifests = runtime
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("opened session was not installed"))?
+        .admin()
+        .tools()
+        .active_manifests()
+        .await?;
+    *toolset_hash = hash12(&serde_json::to_vec(&manifests).unwrap_or_else(|_| b"[]".to_vec()));
     Ok(())
 }
 
@@ -413,10 +412,13 @@ pub(super) async fn handle_resume(
         }
     } else {
         const SESSION_PICKER_LIMIT: usize = 50;
+        let incompatible_count = session_log::incompatible_session_count();
         let current_session_id = logger.session_id.clone();
-        let mut sessions = session_log::list_recent_sessions(SESSION_PICKER_LIMIT + 1).await;
+        let mut sessions = runtime_factory
+            .list_recent_sessions(SESSION_PICKER_LIMIT + 1)
+            .await?;
         sessions.retain(|si| si.session_id != current_session_id);
-        if sessions.is_empty() {
+        if sessions.is_empty() && incompatible_count == 0 {
             app.timeline.push(UiTimelineItem::SystemMessage(
                 "No sessions found.".to_string(),
             ));
@@ -424,7 +426,7 @@ pub(super) async fn handle_resume(
             app.scroll_to_bottom();
         } else {
             sessions.truncate(SESSION_PICKER_LIMIT);
-            app.show_session_picker(sessions);
+            app.show_session_picker_with_incompatible(sessions, incompatible_count);
         }
     }
     Ok(false)
@@ -452,9 +454,102 @@ pub(super) fn handle_skills(app: &mut App) -> anyhow::Result<bool> {
     Ok(false)
 }
 
+/// Human label for an expansion level, matching the `/expand` arguments.
+fn expand_level_label(level: u8) -> &'static str {
+    match level {
+        0 => "compact",
+        1 => "normal",
+        _ => "full",
+    }
+}
+
+const EXPAND_USAGE: &str =
+    "Usage: `/expand compact|normal|full` (Ctrl+O cycles compact/normal, Alt+O toggles full)";
+
+/// Map a `/expand` argument to an expansion level. Numeric synonyms match
+/// the internal levels so `/expand 2` and `/expand full` agree.
+fn parse_expand_level(argument: &str) -> Result<u8, String> {
+    match argument.trim().to_ascii_lowercase().as_str() {
+        "compact" | "0" => Ok(0),
+        "normal" | "1" => Ok(1),
+        "full" | "2" => Ok(2),
+        other => Err(format!(
+            "Unknown expansion level `{other}`.\n{EXPAND_USAGE}"
+        )),
+    }
+}
+
+pub(super) fn handle_expand(argument: Option<String>, app: &mut App) -> anyhow::Result<bool> {
+    let Some(argument) = argument else {
+        push_system_message(
+            app,
+            format!(
+                "Current expansion: `{}`\n{EXPAND_USAGE}",
+                expand_level_label(app.expand_level)
+            ),
+        );
+        return Ok(false);
+    };
+    let level = match parse_expand_level(&argument) {
+        Ok(level) => level,
+        Err(message) => {
+            push_system_message(app, message);
+            return Ok(false);
+        }
+    };
+    app.set_expand_level(level);
+    push_system_message(
+        app,
+        format!("Expansion set to `{}`.", expand_level_label(level)),
+    );
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expand_argument_accepts_names_and_numeric_synonyms() {
+        for (argument, level) in [
+            ("compact", 0),
+            ("normal", 1),
+            ("full", 2),
+            ("0", 0),
+            ("1", 1),
+            ("2", 2),
+            ("  FULL  ", 2),
+        ] {
+            assert_eq!(
+                parse_expand_level(argument),
+                Ok(level),
+                "argument {argument}"
+            );
+        }
+    }
+
+    #[test]
+    fn expand_argument_rejects_junk_with_usage() {
+        let error = parse_expand_level("everything").expect_err("junk must be rejected");
+        assert!(
+            error.contains("Unknown expansion level `everything`"),
+            "got {error}",
+        );
+        assert!(error.contains("/expand compact|normal|full"), "got {error}");
+        assert!(error.contains("Alt+O"), "got {error}");
+        assert!(parse_expand_level("3").is_err());
+    }
+
+    #[test]
+    fn expand_level_labels_match_arguments() {
+        for level in [0u8, 1, 2] {
+            assert_eq!(
+                parse_expand_level(expand_level_label(level)),
+                Ok(level),
+                "label round-trip for {level}",
+            );
+        }
+    }
 
     #[test]
     fn fork_fallback_message_uses_resume_id_command() {

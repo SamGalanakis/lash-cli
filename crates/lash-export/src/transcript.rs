@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
-use lash_core::session_model::{Message, MessageRole, PartKind, ProtocolEvent};
-use lash_core::{ChronologicalEntry, ChronologicalPayload, ChronologicalProjection};
+use lash::messages::{Message, MessageRole, PartKind};
+use lash::persistence::ProtocolEvent;
+use lash::persistence::{ChronologicalEntry, ChronologicalPayload, ChronologicalProjection};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LashlangTranscriptStep {
@@ -230,7 +231,7 @@ pub fn format_tokens(n: i64) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use lash_core::session_model::{Part, PruneState};
+    use lash::messages::Part;
 
     use super::*;
 
@@ -238,18 +239,7 @@ mod tests {
         Message {
             id: id.to_string(),
             role,
-            parts: Arc::new(vec![Part {
-                id: format!("{id}.p0"),
-                kind: PartKind::Text,
-                content: text.to_string(),
-                attachment: None,
-                tool_call_id: None,
-                tool_name: None,
-                tool_replay: None,
-                prune_state: PruneState::Intact,
-                reasoning_meta: None,
-                response_meta: None,
-            }]),
+            parts: Arc::new(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
             origin: None,
         }
     }
@@ -259,30 +249,8 @@ mod tests {
             id: id.to_string(),
             role: MessageRole::Assistant,
             parts: Arc::new(vec![
-                Part {
-                    id: format!("{id}.r"),
-                    kind: PartKind::Reasoning,
-                    content: reasoning.to_string(),
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                },
-                Part {
-                    id: format!("{id}.t"),
-                    kind: PartKind::Text,
-                    content: text.to_string(),
-                    attachment: None,
-                    tool_call_id: None,
-                    tool_name: None,
-                    tool_replay: None,
-                    prune_state: PruneState::Intact,
-                    reasoning_meta: None,
-                    response_meta: None,
-                },
+                Part::reasoning(format!("{id}.r"), reasoning.to_string(), None),
+                Part::text(format!("{id}.t"), text.to_string(), None),
             ]),
             origin: None,
         }
@@ -302,9 +270,8 @@ mod tests {
             protocol_iteration: 3,
             code: "answer = 1".to_string(),
             output: vec!["1".to_string()],
-            images: Vec::new(),
-            error: None,
             final_output,
+            ..Default::default()
         }
     }
 

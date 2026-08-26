@@ -20,7 +20,7 @@ fff-zlob = ["fff-search/zlob"]
 lashlang = ["dep:lash-lashlang-runtime", "lash-tool-support/lashlang"]
 
 [dependencies]
-lash-core = { workspace = true }
+lash = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }
 lash-tool-support = { workspace = true }
 async-trait = { workspace = true }

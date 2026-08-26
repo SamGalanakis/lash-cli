@@ -1,7 +1,7 @@
 //! Autoresearch tool catalog: tool provider, definitions, and shell execution.
 
 use super::*;
-use lash_lashlang_runtime::ToolDefinitionLashlangExt;
+use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 pub(crate) struct AutoresearchTools {
     pub(crate) workdir: PathBuf,
@@ -18,7 +18,7 @@ pub(crate) fn autoresearch_tool(
         "init_experiment" => "init",
         "run_experiment" => "run",
         "log_experiment" => "log",
-        other => panic!("unknown autoresearch Lashlang tool binding for `{other}`"),
+        other => panic!("unknown autoresearch tool binding for `{other}`"),
     };
     ToolDefinition::raw(
         format!("tool:{name}"),
@@ -27,11 +27,7 @@ pub(crate) fn autoresearch_tool(
         input_schema,
         output_schema,
     )
-    .with_lashlang_binding(lash_lashlang_runtime::LashlangToolBinding::new(
-        ["research"],
-        operation,
-    ))
-    .with_scheduling(ToolScheduling::Parallel)
+    .with_tool_binding(ToolBinding::new(["research"], operation))
 }
 
 #[async_trait]
@@ -50,15 +46,15 @@ impl ToolProvider for AutoresearchTools {
             .map(|tool| Arc::new(tool.contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         match call.name {
             "init_experiment" => self.execute_init(call.args),
             "log_experiment" => self.execute_log(call.args),
             "run_experiment" => {
-                self.execute_run(call.args, Some(call.context), call.progress)
+                self.execute_run(call.args, call.context.cancellation_token().cloned())
                     .await
             }
-            other => ToolResult::err_fmt(format_args!("unknown autoresearch tool `{other}`")),
+            other => ToolOutcome::err_fmt(format_args!("unknown autoresearch tool `{other}`")),
         }
     }
 }
@@ -154,7 +150,7 @@ impl AutoresearchTools {
         ]
     }
 
-    fn execute_init(&self, args: &Value) -> ToolResult {
+    fn execute_init(&self, args: &Value) -> ToolOutcome {
         let name = match require_string(args, "name") {
             Ok(value) => value,
             Err(err) => return err,
@@ -170,11 +166,11 @@ impl AutoresearchTools {
             .to_string();
         let direction = match parse_direction(args.get("direction").and_then(Value::as_str)) {
             Ok(value) => value,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         let entries = match load_journal(&self.workdir) {
             Ok(value) => value,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         let next_segment = entries
             .iter()
@@ -194,25 +190,25 @@ impl AutoresearchTools {
             direction,
         });
         if let Err(err) = append_journal_entry(&self.workdir, &entry) {
-            return ToolResult::err_fmt(err);
+            return ToolOutcome::err_fmt(err);
         }
         if let Ok(mut state) = self.state.lock() {
             state.touched = true;
         }
         let summary = match self.summary() {
             Ok(value) => value,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         if let Err(err) = rewrite_markdown(&self.workdir, &summary) {
-            return ToolResult::err_fmt(err);
+            return ToolOutcome::err_fmt(err);
         }
-        ToolResult::ok(json!({
+        ToolOutcome::ok(json!({
             "segment": next_segment,
             "status": summary,
         }))
     }
 
-    fn execute_log(&self, args: &Value) -> ToolResult {
+    fn execute_log(&self, args: &Value) -> ToolOutcome {
         let commit = match require_string(args, "commit") {
             Ok(value) => value,
             Err(err) => return err,
@@ -223,7 +219,7 @@ impl AutoresearchTools {
         };
         let status = match parse_status(args.get("status").and_then(Value::as_str)) {
             Ok(value) => value,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         let description = match require_string(args, "description") {
             Ok(value) => value,
@@ -231,17 +227,17 @@ impl AutoresearchTools {
         };
         let metrics = match parse_metrics_object(args.get("metrics")) {
             Ok(value) => value,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         let mut entries = match load_journal(&self.workdir) {
             Ok(value) => value,
-            Err(err) => return ToolResult::err_fmt(err),
+            Err(err) => return ToolOutcome::err_fmt(err),
         };
         let Some(config) = entries.iter().rev().find_map(|entry| match entry {
             JournalEntry::Config(config) => Some(config.clone()),
             JournalEntry::Result(_) => None,
         }) else {
-            return ToolResult::err_fmt("init_experiment must be called before log_experiment");
+            return ToolOutcome::err_fmt("init_experiment must be called before log_experiment");
         };
         let current_results = entries
             .iter()
@@ -255,7 +251,7 @@ impl AutoresearchTools {
         let confidence = confidence_for_candidate(&config, &current_results, metric);
         let state = match self.state.lock() {
             Ok(value) => value,
-            Err(_) => return ToolResult::err_fmt("autoresearch state poisoned"),
+            Err(_) => return ToolOutcome::err_fmt("autoresearch state poisoned"),
         };
         let last_run = state.last_run.clone();
         drop(state);
@@ -274,7 +270,7 @@ impl AutoresearchTools {
             confidence,
         });
         if let Err(err) = append_journal_entry(&self.workdir, &entry) {
-            return ToolResult::err_fmt(err);
+            return ToolOutcome::err_fmt(err);
         }
         if let Ok(mut state) = self.state.lock() {
             state.touched = true;
@@ -283,7 +279,7 @@ impl AutoresearchTools {
         let summary = {
             let state = match self.state.lock() {
                 Ok(value) => value,
-                Err(_) => return ToolResult::err_fmt("autoresearch state poisoned"),
+                Err(_) => return ToolOutcome::err_fmt("autoresearch state poisoned"),
             };
             compute_summary(
                 &state.mode,
@@ -293,9 +289,9 @@ impl AutoresearchTools {
             )
         };
         if let Err(err) = rewrite_markdown(&self.workdir, &summary) {
-            return ToolResult::err_fmt(err);
+            return ToolOutcome::err_fmt(err);
         }
-        ToolResult::ok(json!({
+        ToolOutcome::ok(json!({
             "status": summary,
         }))
     }
@@ -303,9 +299,8 @@ impl AutoresearchTools {
     async fn execute_run(
         &self,
         args: &Value,
-        context: Option<&ToolContext<'_>>,
-        progress: Option<&lash_core::ProgressSender>,
-    ) -> ToolResult {
+        cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    ) -> ToolOutcome {
         let command = match require_string(args, "command") {
             Ok(value) => value,
             Err(err) => return err,
@@ -329,15 +324,14 @@ impl AutoresearchTools {
             &self.workdir,
             &command,
             timeout_seconds,
-            context.and_then(|value| value.cancellation_token().cloned()),
-            progress,
+            cancellation_token.clone(),
         )
         .await
         {
             Ok(value) => value,
             Err(err) => {
                 self.finish_run(None);
-                return ToolResult::err_fmt(err);
+                return ToolOutcome::err_fmt(err);
             }
         };
 
@@ -350,15 +344,14 @@ impl AutoresearchTools {
                 &self.workdir,
                 "bash autoresearch.checks.sh",
                 checks_timeout_seconds,
-                context.and_then(|value| value.cancellation_token().cloned()),
-                None,
+                cancellation_token,
             )
             .await
             {
                 Ok(value) => Some(value),
                 Err(err) => {
                     self.finish_run(None);
-                    return ToolResult::err_fmt(err);
+                    return ToolOutcome::err_fmt(err);
                 }
             }
         } else {
@@ -383,7 +376,7 @@ impl AutoresearchTools {
         };
         self.finish_run(Some(last_run.clone()));
 
-        ToolResult::ok(json!({
+        ToolOutcome::ok(json!({
             "command": command,
             "exit_code": run.exit_code,
             "duration_seconds": run.duration_seconds,
@@ -514,7 +507,6 @@ pub(crate) async fn execute_shell_command(
     command: &str,
     timeout_seconds: u64,
     cancellation_token: Option<tokio_util::sync::CancellationToken>,
-    progress: Option<&lash_core::ProgressSender>,
 ) -> Result<CommandRun, String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "bash".to_string());
     let mut child = Command::new(shell);
@@ -532,7 +524,6 @@ pub(crate) async fn execute_shell_command(
         .stdout
         .take()
         .ok_or_else(|| "failed to capture experiment stdout".to_string())?;
-    let progress = progress.cloned();
     let read_task = tokio::spawn(async move {
         let mut bytes = Vec::new();
         let mut chunk = [0u8; 4096];
@@ -545,12 +536,6 @@ pub(crate) async fn execute_shell_command(
                 break;
             }
             bytes.extend_from_slice(&chunk[..read]);
-            if let Some(progress) = progress.as_ref() {
-                let _ = progress.send(lash_core::SandboxMessage {
-                    text: String::from_utf8_lossy(&chunk[..read]).into_owned(),
-                    kind: "tool_output".to_string(),
-                });
-            }
         }
         Ok::<Vec<u8>, String>(bytes)
     });

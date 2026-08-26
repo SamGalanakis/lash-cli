@@ -8,10 +8,6 @@ pub fn render(session: &LoadedSession) -> String {
     let meta = session.meta.as_ref().map(|meta| {
         json!({
             "session_id": meta.session_id,
-            "session_name": meta.session_name,
-            "created_at": meta.created_at,
-            "model": meta.model,
-            "cwd": meta.cwd,
             "parent_session_id": meta.parent_session_id(),
             "relation": meta.relation,
         })
@@ -19,6 +15,7 @@ pub fn render(session: &LoadedSession) -> String {
 
     let document = json!({
         "meta": meta,
+        "model_id": session.model_id,
         "trace_path": session.trace_path.display().to_string(),
         "context_window_tokens": session.context_window_tokens,
         "chronological": session.chronological,
@@ -31,9 +28,8 @@ pub fn render(session: &LoadedSession) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{
-        ChronologicalEntry, ChronologicalPayload, Message, MessageRole, PruneState, shared_parts,
-    };
+    use lash::messages::{Message, MessageRole, Part};
+    use lash::persistence::{ChronologicalEntry, ChronologicalPayload};
     use std::path::PathBuf;
 
     #[test]
@@ -45,22 +41,16 @@ mod tests {
                 payload: ChronologicalPayload::Message(Message {
                     id: "m1".to_string(),
                     role: MessageRole::User,
-                    parts: shared_parts(vec![lash_core::Part {
-                        id: "p1".to_string(),
-                        kind: lash_core::PartKind::Text,
-                        content: "hello".to_string(),
-                        attachment: None,
-                        tool_call_id: None,
-                        tool_name: None,
-                        tool_replay: None,
-                        prune_state: PruneState::Intact,
-                        reasoning_meta: None,
-                        response_meta: None,
-                    }]),
+                    parts: std::sync::Arc::new(vec![Part::text(
+                        "p1".to_string(),
+                        "hello".to_string(),
+                        None,
+                    )]),
                     origin: None,
                 }),
             }],
             trace_path: PathBuf::from("session.trace.jsonl"),
+            model_id: None,
             context_window_tokens: None,
             llm_prompts: Vec::new(),
         };

@@ -51,10 +51,10 @@ fn parse_variant_input(input: &str) -> Result<String, String> {
 }
 
 pub(crate) fn validate_model_selection(
-    provider: &ProviderHandle,
-    selection: &ModelSelection,
+    _provider: &ProviderHandle,
+    _selection: &ModelSelection,
 ) -> Result<(), String> {
-    provider.validate_model_name(&selection.model)
+    Ok(())
 }
 
 /// Curated model limits that take precedence over models.dev — only for
@@ -84,7 +84,6 @@ pub(crate) fn resolve_model_selection(
     selection: &ModelSelection,
     catalog: &CachedModelCatalog,
 ) -> Result<ResolvedModelSpec, String> {
-    provider.validate_model_name(&selection.model)?;
     let configured_model = selection.model.trim();
     let catalog_model_id =
         crate::provider_metadata::provider_catalog_model_id(provider.kind(), configured_model);
@@ -168,21 +167,21 @@ pub(crate) fn resolve_model_variant(
 
 pub(crate) fn reasoning_selection_from_variant(
     variant: Option<String>,
-) -> lash_core::ReasoningSelection {
+) -> lash::provider::ReasoningSelection {
     match variant.as_deref() {
-        None | Some("default") => lash_core::ReasoningSelection::ProviderDefault,
-        Some("off") => lash_core::ReasoningSelection::Disabled,
-        Some(_) => lash_core::ReasoningSelection::Effort(variant.expect("variant is present")),
+        None | Some("default") => lash::provider::ReasoningSelection::ProviderDefault,
+        Some("off") => lash::provider::ReasoningSelection::Disabled,
+        Some(_) => lash::provider::ReasoningSelection::Effort(variant.expect("variant is present")),
     }
 }
 
 pub(crate) fn variant_from_reasoning_selection(
-    selection: lash_core::ReasoningSelection,
+    selection: lash::provider::ReasoningSelection,
 ) -> Option<String> {
     match selection {
-        lash_core::ReasoningSelection::ProviderDefault => None,
-        lash_core::ReasoningSelection::Disabled => Some("off".to_string()),
-        lash_core::ReasoningSelection::Effort(effort) => Some(effort),
+        lash::provider::ReasoningSelection::ProviderDefault => None,
+        lash::provider::ReasoningSelection::Disabled => Some("off".to_string()),
+        lash::provider::ReasoningSelection::Effort(effort) => Some(effort),
     }
 }
 
@@ -226,7 +225,7 @@ pub(crate) fn expose_provider_thinking(provider: &mut ProviderHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::testing::TestProvider;
+    use lash::testing::TestProvider;
 
     fn provider(kind: &'static str) -> ProviderHandle {
         TestProvider::builder().kind(kind).build().into_handle()
@@ -304,7 +303,7 @@ mod tests {
         );
         assert_eq!(
             reasoning_selection_from_variant(Some("off".to_string())),
-            lash_core::ReasoningSelection::Disabled
+            lash::provider::ReasoningSelection::Disabled
         );
     }
 

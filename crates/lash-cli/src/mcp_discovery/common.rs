@@ -1,3 +1,4 @@
+//! Shared MCP discovery helpers.
 use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 

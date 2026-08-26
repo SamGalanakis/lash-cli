@@ -1,8 +1,8 @@
 //! Applying plugin/UI-extension host effects to the TUI [`App`], plus the
 //! shared system-message and UI-snapshot helpers.
 
+use lash::plugins::{PluginOwned, PluginRuntimeEvent};
 use lash::{LashSession, TurnEvent, TurnInput};
-use lash_core::{PluginOwned, PluginRuntimeEvent};
 use lash_tui_extensions::{TuiExtensions, TuiHostEffect};
 
 use crate::app::{App, PluginPanelBlock, UiTimelineItem};
@@ -213,19 +213,14 @@ fn replay_plugin_operation_receipt(
     }
 }
 
-/// Project the facade's rich [`ObservedProcess`](lash_core::ObservedProcess)
+/// Project the facade's rich [`ObservedProcess`](lash::process::ObservedProcess)
 /// onto the model/handle row the process dock renders. The dock is keyed on the
 /// grant-entry handle shape, so this is the one boundary that maps the unified
 /// facade vocabulary back to it.
 pub(crate) fn observed_to_handle_summary(
-    process: lash_core::ObservedProcess,
-) -> lash_core::ProcessHandleSummary {
-    lash_core::ProcessHandleSummary::new(
-        process.process_id,
-        lash_core::ProcessHandleDescriptor::new(Some(process.kind), Some(process.label)),
-        process.lifecycle,
-    )
-    .with_definition(process.identity.definition)
+    process: lash::process::ObservedProcess,
+) -> lash::process::ProcessHandleView {
+    lash::process::ProcessHandleView::new(process.process_id, process.identity, process.lifecycle)
 }
 
 fn push_plugin_operation_message(app: &mut App, output: &serde_json::Value) {

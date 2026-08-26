@@ -1,19 +1,26 @@
 mod cache;
+mod catalog_sync;
 mod input;
 mod live;
 mod projection;
 mod queues;
 mod runtime_events;
+#[cfg(test)]
+mod runtime_events_tests;
 mod view;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use lash_core::runtime::PendingTurnInput;
-use lash_core::{
-    Message, MessageRole, PartKind, PluginMessage, ProcessHandleSummary, ProcessLifecycleStatus,
-    PromptUsage, SessionProcessEventKind, TokenUsage, ToolCallRecord,
-};
+use lash::PendingTurnInput;
+use lash::TurnActivityId;
+use lash::messages::{Message, MessageRole, PartKind};
+use lash::observe::SessionProcessEventKind;
+use lash::plugins::PluginMessage;
+use lash::process::{ProcessHandleView, ProcessStatus};
+use lash::runtime::PromptUsage;
+use lash::tools::ToolCallRecord;
+use lash::usage::TokenUsage;
 use lash_tui::{Line, Rect};
 use lash_tui_extensions::TuiExtensions;
 
@@ -34,8 +41,7 @@ pub(crate) use self::projection::{
     UiActivityJournal, UiActivityRecord, UiTimeline, UiTimelineItem, preview_text_lines,
     smart_truncate_preview_line, timeline_from_read_view,
 };
-#[cfg(test)]
-pub(crate) use self::projection::{interrupted_blocks_from_read_view, strip_ansi_escape_sequences};
+pub(crate) use self::queues::turn_input_display_text;
 
 fn user_turn_start_indices(blocks: &[UiTimelineItem]) -> Vec<usize> {
     blocks
@@ -114,7 +120,7 @@ pub struct ProcessView {
     pub kind: String,
     pub label: String,
     pub definition: Option<String>,
-    pub status: ProcessLifecycleStatus,
+    pub status: ProcessStatus,
     pub first_seen: std::time::Instant,
     pub status_duration: Option<std::time::Duration>,
     pub transient_until: Option<std::time::Instant>,
@@ -122,19 +128,15 @@ pub struct ProcessView {
 
 impl ProcessView {
     fn from_summary(
-        summary: ProcessHandleSummary,
+        summary: ProcessHandleView,
         first_seen: std::time::Instant,
         status_duration: Option<std::time::Duration>,
         transient_until: Option<std::time::Instant>,
     ) -> Self {
-        let kind = summary
-            .descriptor
-            .kind
-            .unwrap_or_else(|| "process".to_string());
+        let kind = summary.kind;
         let label = summary
-            .descriptor
             .label
-            .unwrap_or_else(|| summary.process_id.clone());
+            .unwrap_or_else(|| summary.process_id.to_string());
         let definition = summary.definition.map(|definition| {
             definition
                 .get("process_name")
@@ -143,7 +145,7 @@ impl ProcessView {
                 .unwrap_or_else(|| definition.to_string())
         });
         Self {
-            process_id: summary.process_id,
+            process_id: summary.process_id.to_string(),
             kind,
             label,
             definition,
@@ -437,9 +439,6 @@ pub(crate) const SPLASH_CONTENT_HEIGHT: usize = 8;
 pub(crate) const SPLASH_SCROLLBACK_HEIGHT: usize = SPLASH_CONTENT_HEIGHT + 2;
 pub(super) const FOLLOW_OUTPUT_CONTEXT_LINES: usize = 2;
 
-#[cfg(test)]
-mod tests;
-
 /// Mouse text selection state for selectable output surfaces.
 ///
 /// Coordinates are in **content space**: (column, virtual_row) where the
@@ -495,17 +494,9 @@ pub struct RenderCache {
 /// into a flat field bag on [`App`].
 #[derive(Default)]
 pub struct UsageState {
-    /// Cumulative token usage for the current session: parent's own LLM
-    /// tokens plus the latest cumulative reported by each child session.
-    /// Recomputed on every [`lash::TurnEvent::Usage`] and
-    /// [`lash::TurnEvent::ChildUsage`].
+    /// Cumulative token usage for the current session, refreshed from Lash's
+    /// canonical session usage report when a turn completes.
     pub token_usage: TokenUsage,
-    /// Parent's own LLM cumulative, kept separately so we can recompute
-    /// `token_usage` when child sessions update.
-    pub parent_session_cumulative: TokenUsage,
-    /// Latest cumulative reported per child session (subagents, compaction,
-    /// observers). Keyed by child session id.
-    pub child_session_cumulatives: HashMap<String, TokenUsage>,
     /// Context window size for the current model (from models.dev).
     pub context_window: Option<u64>,
     /// Latest completed model usage for context accounting.
@@ -533,6 +524,24 @@ pub struct LiveTurnView {
     pub reasoning: LiveMarkdown,
     /// Live tool output preview anchored to the active tool activity block.
     pub tool_output: LiveToolOutput,
+    /// Provider-output chunks for the current model request. Correlation ids
+    /// let a retry retract only the failed attempt's streamed text.
+    model_output_chunks: Vec<ModelOutputChunk>,
+    /// Timeline boundary before the current request began rendering output.
+    model_output_timeline_start: usize,
+}
+
+#[derive(Clone, Copy)]
+enum ModelOutputLane {
+    Assistant,
+    Reasoning,
+}
+
+#[derive(Clone)]
+struct ModelOutputChunk {
+    correlation_id: TurnActivityId,
+    lane: ModelOutputLane,
+    text: String,
 }
 
 impl Default for LiveTurnView {
@@ -542,6 +551,8 @@ impl Default for LiveTurnView {
             assistant: LiveMarkdown::new(crate::assistant_text::MarkdownLane::Assistant),
             reasoning: LiveMarkdown::new(crate::assistant_text::MarkdownLane::Reasoning),
             tool_output: LiveToolOutput::default(),
+            model_output_chunks: Vec::new(),
+            model_output_timeline_start: 0,
         }
     }
 }
@@ -605,6 +616,10 @@ pub struct App {
     pub model_variant: Option<String>,
     /// Display-facing execution mode for the active runtime.
     pub execution_mode_label: String,
+    /// Pinned RLM dialect for the active session, when applicable.
+    pub rlm_dialect_label: Option<String>,
+    /// Failure latch for automatic post-turn catalog refreshes in this session.
+    automatic_tool_catalog_sync: catalog_sync::AutomaticToolCatalogSyncState,
     /// Unique session name (e.g. "alpine-canyon").
     pub session_name: String,
     /// Live session id (UUID) for the active runtime. Updated on resume
@@ -645,6 +660,8 @@ pub struct App {
     lashlang_block_anchors: HashMap<String, (usize, usize)>,
     /// Set only when this local UI requested cancellation via Esc.
     manual_interrupt_requested: bool,
+    /// Physical Lash turn identity learned from the builder's turn-scoped activity sink.
+    active_turn_id: Option<String>,
     /// Retry details to keep visible once the retry request is in flight.
     pending_retry_status: Option<String>,
     /// Current text selection state.
@@ -738,7 +755,7 @@ impl App {
         }
     }
 
-    pub fn finish_turn_from_read_view(&mut self, read_view: &lash_core::SessionReadView) {
+    pub fn finish_turn_from_read_view(&mut self, read_view: &lash::persistence::SessionReadView) {
         let current_turn_starts = user_turn_start_indices(self.timeline.items());
         let current_turn_start = current_turn_starts.last().copied();
         let local_system_messages = self.local_system_messages();
@@ -776,7 +793,7 @@ impl App {
 
     pub fn finish_interrupted_turn_from_read_view(
         &mut self,
-        read_view: &lash_core::SessionReadView,
+        read_view: &lash::persistence::SessionReadView,
         ui_state: &UiProjectionState,
         status_message: impl Into<String>,
     ) {
@@ -879,6 +896,8 @@ impl App {
             usage: UsageState::default(),
             model_variant: Default::default(),
             execution_mode_label: "standard".to_string(),
+            rlm_dialect_label: None,
+            automatic_tool_catalog_sync: Default::default(),
             session_name,
             session_id,
             repo_status: std::env::current_dir()
@@ -898,6 +917,7 @@ impl App {
             next_lashlang_block_ordinal: 0,
             lashlang_block_anchors: HashMap::new(),
             manual_interrupt_requested: false,
+            active_turn_id: None,
             pending_retry_status: None,
             selection: TextSelection::default(),
             toast: None,
@@ -995,27 +1015,6 @@ impl App {
         self.editor.take_large_pastes()
     }
 
-    /// Recompute the session-wide cumulative token usage from the parent's
-    /// cumulative plus the latest cumulative reported by each child session.
-    fn recompute_session_token_usage(&mut self) {
-        let mut total = self.usage.parent_session_cumulative.clone();
-        for child in self.usage.child_session_cumulatives.values() {
-            total.add(child);
-        }
-        self.usage.token_usage = total;
-    }
-
-    /// Remove the empty-state splash once real conversation content is present.
-    #[cfg(test)]
-    pub fn dismiss_splash(&mut self) {
-        if !matches!(self.timeline.first(), Some(UiTimelineItem::Splash)) {
-            return;
-        }
-        self.timeline
-            .retain(|block| !matches!(block, UiTimelineItem::Splash));
-        self.invalidate_height_cache();
-    }
-
     pub fn set_ui_extensions(&mut self, ui_extensions: Arc<TuiExtensions>) {
         self.ui_extensions = ui_extensions;
         self.ui_extensions.mount_surface(
@@ -1047,7 +1046,7 @@ impl App {
         self.dirty = true;
     }
 
-    pub fn update_processes(&mut self, tasks: Vec<ProcessHandleSummary>) {
+    pub fn update_processes(&mut self, tasks: Vec<ProcessHandleView>) {
         let now = std::time::Instant::now();
         let previous: HashMap<String, ProcessView> = self
             .processes
@@ -1059,8 +1058,8 @@ impl App {
         for task in tasks {
             let old_status = previous
                 .get(&task.process_id)
-                .and_then(|item| item.status.terminal_state());
-            let status = task.status.terminal_state();
+                .and_then(|item| item.status.is_terminal().then_some(item.status));
+            let status = task.status.is_terminal().then_some(task.status);
             let first_seen = previous
                 .get(&task.process_id)
                 .map(|item| item.first_seen)
@@ -1116,7 +1115,7 @@ impl App {
             if !process_ids.contains(process.process_id.as_str()) || process.status.is_terminal() {
                 continue;
             }
-            process.status = ProcessLifecycleStatus::Cancelled;
+            process.status = ProcessStatus::Cancelled;
             process
                 .status_duration
                 .get_or_insert_with(|| process.first_seen.elapsed());
@@ -1203,6 +1202,11 @@ impl App {
     pub fn set_execution_mode_label(&mut self, mode: &crate::execution_settings::ExecutionMode) {
         self.execution_mode_label =
             crate::execution_settings::execution_mode_label(mode).to_string();
+        self.dirty = true;
+    }
+
+    pub fn set_rlm_dialect(&mut self, dialect: Option<crate::execution_settings::RlmDialect>) {
+        self.rlm_dialect_label = dialect.map(|dialect| dialect.language_id().to_string());
         self.dirty = true;
     }
 }

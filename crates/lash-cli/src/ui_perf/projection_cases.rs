@@ -1,10 +1,10 @@
 use std::time::Instant;
 
-use lash_core::{
-    Message, MessageRole, Part, PartKind, PruneState, SessionReadView, SessionSnapshot,
-    ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, ToolResult, TurnActivity,
-    TurnEvent,
-};
+use lash::messages::{Message, MessageRole, Part, PartKind};
+use lash::persistence::SessionReadView;
+use lash::runtime::SessionSnapshot;
+use lash::tools::{ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, ToolOutcome};
+use lash::{TurnActivity, TurnEvent};
 use serde_json::json;
 
 use crate::app::{
@@ -106,7 +106,7 @@ pub(crate) fn run_turn_interrupt_steer_reconciliation_once(
     app.finish_turn_from_read_view(&read_view);
     app.start_turn();
     app.handle_turn_activity(TurnActivity::independent(TurnEvent::AssistantProseDelta {
-        text: "I am midway through the current answer while a steer arrives.".to_string(),
+        text: "I am midway through the current answer while a steer arrives.".into(),
     }));
 
     let active = PreparedTurn::prepare_with_effective_text(
@@ -132,25 +132,25 @@ pub(crate) fn run_turn_interrupt_steer_reconciliation_once(
         1,
         "ui-ti-active-accepted",
         &active,
-        lash_core::TurnInputIngress::active_turn(
+        lash::persistence::TurnInputIngress::active_turn(
             "ui-active-turn",
-            lash_core::TurnInputCheckpointBoundary::AfterWork,
+            lash::persistence::TurnInputCheckpointBoundary::AfterWork,
         ),
     );
     let mut deferred_pending = pending_turn_input_for_ui_perf(
         2,
         "ui-ti-active-deferred",
         &deferred,
-        lash_core::TurnInputIngress::active_turn(
+        lash::persistence::TurnInputIngress::active_turn(
             "ui-active-turn",
-            lash_core::TurnInputCheckpointBoundary::BeforeCompletion,
+            lash::persistence::TurnInputCheckpointBoundary::BeforeCompletion,
         ),
     );
     let queued_pending = pending_turn_input_for_ui_perf(
         3,
         "ui-ti-next",
         &queued,
-        lash_core::TurnInputIngress::NextTurn,
+        lash::persistence::TurnInputIngress::NextTurn,
     );
     let active_input_id = active_pending.input_id.clone();
     app.set_pending_turn_input_snapshot(vec![
@@ -197,8 +197,8 @@ pub(crate) fn run_turn_interrupt_steer_reconciliation_once(
         &ui_state,
         crate::util::manual_interrupt_message(),
     );
-    deferred_pending.ingress = lash_core::TurnInputIngress::NextTurn;
-    deferred_pending.state = lash_core::TurnInputState::DeferredNextTurn;
+    deferred_pending.ingress = lash::persistence::TurnInputIngress::NextTurn;
+    deferred_pending.state = lash::persistence::TurnInputState::DeferredNextTurn;
     app.set_pending_turn_input_snapshot(vec![deferred_pending.clone(), queued_pending.clone()]);
     result.sample("interrupt_reconciliation_ms", elapsed_ms(interrupt_started));
 
@@ -248,13 +248,17 @@ fn pending_turn_input_for_ui_perf(
     enqueue_seq: u64,
     input_id: &str,
     turn: &PreparedTurn,
-    ingress: lash_core::TurnInputIngress,
-) -> lash_core::PendingTurnInput {
+    ingress: lash::persistence::TurnInputIngress,
+) -> lash::PendingTurnInput {
     let state = match ingress {
-        lash_core::TurnInputIngress::ActiveTurn { .. } => lash_core::TurnInputState::PendingActive,
-        lash_core::TurnInputIngress::NextTurn => lash_core::TurnInputState::DeferredNextTurn,
+        lash::persistence::TurnInputIngress::ActiveTurn { .. } => {
+            lash::persistence::TurnInputState::PendingActive
+        }
+        lash::persistence::TurnInputIngress::NextTurn => {
+            lash::persistence::TurnInputState::DeferredNextTurn
+        }
     };
-    lash_core::PendingTurnInput {
+    lash::PendingTurnInput {
         input_id: input_id.to_string(),
         session_id: "ui-interrupt-session".to_string(),
         enqueue_seq,
@@ -267,7 +271,7 @@ fn pending_turn_input_for_ui_perf(
 }
 
 pub(crate) fn build_projection_read_view(turn_count: usize) -> SessionReadView {
-    let mut graph = lash_core::SessionGraph::default();
+    let mut graph = lash::persistence::SessionGraph::default();
 
     for turn in 0..turn_count {
         let user = text_message(
@@ -294,6 +298,8 @@ pub(crate) fn build_projection_read_view(turn_count: usize) -> SessionReadView {
                             .to_string(),
                         output: vec!["time".to_string()],
                         images: Vec::new(),
+                        calls: Vec::new(),
+                        calls_omitted: 0,
                         error: None,
                         final_output: (turn % 10 == 0).then(|| json!("RLM final output")),
                     },
@@ -304,7 +310,9 @@ pub(crate) fn build_projection_read_view(turn_count: usize) -> SessionReadView {
 
     let state = SessionSnapshot {
         session_graph: graph,
-        ..SessionSnapshot::default()
+        ..SessionSnapshot::new(lash::runtime::SessionPolicy::new(
+            crate::host_policy::turn_budget(),
+        ))
     };
     SessionReadView::from_snapshot(&state)
 }
@@ -315,10 +323,10 @@ fn live_activity_event(index: usize) -> TurnEvent {
             protocol_iteration: index / 14,
         },
         1 => TurnEvent::ReasoningDelta {
-            text: format!("reasoning chunk {index}\n"),
+            text: format!("reasoning chunk {index}\n").into(),
         },
         2 => TurnEvent::AssistantProseDelta {
-            text: format!("assistant prose chunk {index}\n"),
+            text: format!("assistant prose chunk {index}\n").into(),
         },
         3 => TurnEvent::ToolCallStarted {
             call_id: Some(format!("shell-{index}")),
@@ -430,7 +438,7 @@ fn live_activity_event(index: usize) -> TurnEvent {
             call_id: Some(format!("generic-{index}")),
             name: "search_tools".to_string(),
             args: json!({ "query": "projection tools" }),
-            output: ToolResult::err(json!("tool search failed"))
+            output: ToolOutcome::err(json!("tool search failed"))
                 .into_done_output()
                 .expect("static failure output"),
             duration_ms: 4,
@@ -463,17 +471,27 @@ fn assistant_message(id: &str, reasoning: &str, text: &str) -> Message {
 }
 
 fn part(id: &str, kind: PartKind, content: &str) -> Part {
-    Part {
-        id: id.to_string(),
-        kind,
-        content: content.to_string(),
-        attachment: None,
-        tool_call_id: None,
-        tool_name: None,
-        tool_replay: None,
-        prune_state: PruneState::Intact,
-        reasoning_meta: None,
-        response_meta: None,
+    match kind {
+        PartKind::Text => Part::text(id.to_string(), content.to_string(), None),
+        PartKind::Attachment => Part::attachment_part(id.to_string(), content.to_string(), None),
+        PartKind::Code => Part::code(id.to_string(), content.to_string()),
+        PartKind::Output => Part::output(id.to_string(), content.to_string()),
+        PartKind::Error => Part::error(id.to_string(), content.to_string()),
+        PartKind::Prose => Part::prose(id.to_string(), content.to_string(), None),
+        PartKind::ToolCall => Part::tool_call(
+            id.to_string(),
+            content.to_string(),
+            String::new(),
+            String::new(),
+            None,
+        ),
+        PartKind::ToolResult => Part::tool_result(
+            id.to_string(),
+            content.to_string(),
+            String::new(),
+            String::new(),
+        ),
+        PartKind::Reasoning => Part::reasoning(id.to_string(), content.to_string(), None),
     }
 }
 

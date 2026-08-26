@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use lash_core::ModelSpec;
+use lash::ModelSpec;
 use reqwest as model_catalog_http;
 
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
@@ -33,18 +33,21 @@ impl ModelInfo {
         id: impl Into<String>,
         variant: Option<String>,
     ) -> Result<ModelSpec, String> {
-        ModelSpec::from_token_limits(
-            id,
-            crate::model_selection::reasoning_selection_from_variant(variant),
-            usize::try_from(self.prompt_budget_tokens())
-                .map_err(|_| "prompt budget does not fit in usize".to_string())?,
-            self.max_output_tokens
-                .map(|value| {
-                    usize::try_from(value)
-                        .map_err(|_| "output token capacity does not fit in usize".to_string())
-                })
-                .transpose()?,
-        )
+        let mut builder = ModelSpec::builder(id)
+            .variant(crate::model_selection::reasoning_selection_from_variant(
+                variant,
+            ))
+            .context_window_tokens(
+                usize::try_from(self.prompt_budget_tokens())
+                    .map_err(|_| "prompt budget does not fit in usize".to_string())?,
+            );
+        if let Some(output_capacity) = self.max_output_tokens {
+            builder = builder.output_token_capacity(
+                usize::try_from(output_capacity)
+                    .map_err(|_| "output token capacity does not fit in usize".to_string())?,
+            );
+        }
+        builder.build().map_err(|error| error.to_string())
     }
 }
 
@@ -139,51 +142,6 @@ pub(crate) trait ModelCatalogStore: Send + Sync {
     fn load(&self) -> Result<Option<String>, String>;
     fn save(&self, raw: &str) -> Result<(), String>;
     fn modified_at(&self) -> Result<Option<SystemTime>, String>;
-}
-
-#[cfg(test)]
-#[derive(Clone, Debug, Default)]
-pub(crate) struct MemoryModelCatalogStore {
-    raw: Arc<RwLock<Option<String>>>,
-    modified_at: Arc<RwLock<Option<SystemTime>>>,
-}
-
-#[cfg(test)]
-impl MemoryModelCatalogStore {
-    pub(crate) fn new(raw: Option<String>) -> Self {
-        Self {
-            raw: Arc::new(RwLock::new(raw)),
-            modified_at: Arc::new(RwLock::new(None)),
-        }
-    }
-}
-
-#[cfg(test)]
-impl ModelCatalogStore for MemoryModelCatalogStore {
-    fn load(&self) -> Result<Option<String>, String> {
-        self.raw
-            .read()
-            .map(|raw| raw.clone())
-            .map_err(|_| "model catalog memory store lock poisoned".to_string())
-    }
-
-    fn save(&self, raw: &str) -> Result<(), String> {
-        self.raw
-            .write()
-            .map_err(|_| "model catalog memory store lock poisoned".to_string())
-            .map(|mut slot| *slot = Some(raw.to_string()))?;
-        self.modified_at
-            .write()
-            .map_err(|_| "model catalog memory store lock poisoned".to_string())
-            .map(|mut slot| *slot = Some(SystemTime::now()))
-    }
-
-    fn modified_at(&self) -> Result<Option<SystemTime>, String> {
-        self.modified_at
-            .read()
-            .map(|value| *value)
-            .map_err(|_| "model catalog memory store lock poisoned".to_string())
-    }
 }
 
 #[async_trait]

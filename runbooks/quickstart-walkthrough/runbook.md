@@ -17,9 +17,9 @@ source is `crates/lash` · `crates/lash-provider-openai`, and its "steps" are Ru
 keystrokes. There is no CLI walkthrough on the page to type into the operator. So this
 runbook gates the page in the two forms its claims actually take:
 
-- **Structural / API claims** (crate names, version pins, the code snippet, the API
-  surface) → machine-verified evidence in the Lash repository (`scripts/lint_docs.py` + a
-  Cargo.toml cross-check).
+- **Structural / API claims** (crate names, the code snippet, the API surface) →
+  machine-verified evidence in the Lash repository: docs lint must pass and the checked-in
+  quickstart snippet must compile against the façade API pinned by this workspace.
 - **The one runtime visible-behavior claim** ("run one turn; read the settled assistant
   message", `println!("{prose}")`) → reproduced against the real `lash` binary through the
   operator: one turn in → one settled assistant message out.
@@ -32,7 +32,7 @@ operator surface. That is a scope clarification to record, not a page defect.
 
 1. **Every visible claim is a gate.** No claim gets a pass on trust — each maps to
    `lint_docs`, a Cargo.toml value, or a rendered operator outcome.
-2. **A mismatch is reported, never fixed.** If a version pin, a crate name, the snippet, or
+2. **A mismatch is reported, never fixed.** If a crate name, the snippet, or
    the one-turn behavior diverges from the page, RCA it and stop — do not reconcile by
    editing docs or code.
 3. **Don't over-claim the analogue.** The operator round-trip stands in for the compiled
@@ -50,14 +50,12 @@ and `Cargo.toml` exist there; confirm the operator exists in this repository.
 | # | Page claim | Gate | Expected |
 |---|-----------|------|----------|
 | 1 | Crate is published as `lash-runtime`; the Rust import stays `use lash::...` | Lash repository `Cargo.toml` alias | `lash = { package = "lash-runtime", … }` |
-| 2 | `lash-runtime = "=0.1.0-alpha.81"` and `lash-provider-openai = "=0.1.0-alpha.81"` | Lash repository `Cargo.toml` workspace `version` | matches (`0.1.0-alpha.81`) |
-| 3 | The "Minimal Example" code (`standard_builder → provider → model(from_token_limits) → effect_host(InlineEffectHost) → attachment_store(InMemoryAttachmentStore) → build`; `core.session(..).open()`; `session.turn(TurnInput::text(..)).run()`; `result.assistant_message()`) | In the Lash repository, `python3 scripts/lint_docs.py` (the page's `data-snippet="quickstart#hello-lash"` is diffed against `examples/docs-snippets/src/quickstart.rs`) | `docs lint: ok` |
+| 2 | The "Minimal Example" code (`standard_builder(TurnBudget::bounded(..)) → provider → model → effect_host(InlineEffectHost) → attachment_store(InMemoryAttachmentStore) → process_env_store(InMemoryProcessExecutionEnvStore) → commit_budget → queued_work_batching → build`; `core.session(..).open()`; `session.turn(TurnInput::text(..)).run()`; `result.assistant_message()`) | In the Lash repository, `python3 scripts/lint_docs.py` (the page's `data-snippet="quickstart#hello-lash"` is diffed against `examples/docs-snippets/src/quickstart.rs`) and the snippet crate's compile check against the pinned façade | `docs lint: ok`; snippet compiles against the pinned façade API |
 
 Run `python3 scripts/lint_docs.py` in the Lash repository — a clean `docs lint: ok` is the
 objective gate that the snippet and page structure haven't drifted from the compiled
-snippet source. Cross-check claims 1–2 against that repository's `Cargo.toml` directly.
-**Any divergence here is a docs bug → report/RCA, don't fix.** (At time of authoring: all
-three pass — the version pins match the workspace, so no drift bug to report.)
+snippet source. Then run the snippet crate's documented compile check at the Lash revision
+pinned by this workspace. **Any divergence here is a docs bug → report/RCA, don't fix.**
 
 ## Phase 2 — The one runtime visible-behavior claim (real binary, drivable)
 
@@ -89,12 +87,11 @@ page's central visible-behavior claim is wrong → report/RCA (do not fix).
 | Item | Objective gate | Verdict | Notes |
 |------|----------------|---------|-------|
 | Crate-name / import claim | Lash repository `Cargo.toml` `package = "lash-runtime"` |  |  |
-| Version pins match workspace | `=0.1.0-alpha.81` == workspace `version` |  |  |
-| Snippet / API surface un-drifted | Lash repository `scripts/lint_docs.py` → `docs lint: ok` |  |  |
+| Snippet / API surface un-drifted | Lash repository `scripts/lint_docs.py` → `docs lint: ok`; quickstart snippet compiles against the pinned façade API |  |  |
 | One-turn settled-message behavior | one turn → one `■` settled message |  |  |
 | Scope framing recorded | page is a library quickstart, not a CLI walkthrough |  |  |
 
-**Aggregate:** do the page's structural claims match the code (crate name, version pins,
+**Aggregate:** do the page's structural claims match the code (crate name and
 snippet), does the real binary honor its one runtime claim (one turn → one settled message),
 and is the library-vs-CLI scope of the page reported rather than papered over. Any concrete
 divergence is surfaced as a docs bug, never edited away.

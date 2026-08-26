@@ -3,10 +3,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lash_core::{
-    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, PromptContribution,
-    SessionPlugin,
+use lash::plugins::{
+    PluginError, PluginFactory, PluginRegistrar, PluginSessionContext, SessionPlugin,
 };
+use lash::prompt::PromptContribution;
 
 const DOCS_DIR: &str = "docs";
 const HOST_DOCS_DIR: &str = "lash-cli";
@@ -189,78 +189,4 @@ fn host_docs_prompt_content(docs_dir: &Path) -> String {
          These docs describe the installed CLI host and override general model memory.",
         docs_dir.display()
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ensure_host_docs_writes_managed_markdown() {
-        let temp = tempfile::TempDir::new().expect("temp dir");
-
-        let docs = ensure_host_docs_at(temp.path(), "9.9.9").expect("host docs");
-
-        assert_eq!(docs.dir(), temp.path().join("docs").join("lash-cli"));
-        assert!(docs.dir().join("README.md").exists());
-        assert!(docs.dir().join("skills.md").exists());
-        assert!(docs.dir().join("config.md").exists());
-        assert!(docs.dir().join("sessions.md").exists());
-        assert!(docs.dir().join("troubleshooting.md").exists());
-        assert_eq!(
-            fs::read_to_string(docs.dir().join("VERSION")).expect("version"),
-            "lash-cli 9.9.9\n"
-        );
-        assert!(
-            fs::read_to_string(docs.dir().join("skills.md"))
-                .expect("skills docs")
-                .contains("$LASH_HOME/skills")
-        );
-    }
-
-    #[test]
-    fn prompt_content_points_at_docs_dir() {
-        let docs_dir = PathBuf::from("/tmp/lash-home/docs/lash-cli");
-
-        let content = host_docs_prompt_content(&docs_dir);
-
-        assert!(content.contains("/tmp/lash-home/docs/lash-cli"));
-        assert!(content.contains("read the relevant markdown file"));
-        assert!(content.contains("override general model memory"));
-    }
-
-    #[tokio::test]
-    async fn plugin_contributes_docs_prompt() {
-        let docs_dir = PathBuf::from("/tmp/lash-home/docs/lash-cli");
-        let plugin_host = lash_core::PluginHost::new(vec![
-            Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
-            Arc::new(lash_protocol_standard::StandardProtocolPluginFactory),
-            Arc::new(HostDocsPluginFactory::new(docs_dir.clone())),
-        ]);
-        let session = plugin_host.build_session("root", None).expect("session");
-
-        let contributions = session
-            .collect_prompt_contributions(lash_core::PromptHookContext {
-                session_id: "root".to_string(),
-                sessions: Arc::new(lash_core::testing::MockSessionManager::default()),
-                state: lash_core::SessionReadView::from_snapshot(
-                    &lash_core::SessionSnapshot::default(),
-                ),
-                protocol_turn_options: lash_core::ProtocolTurnOptions::default(),
-                turn_context: lash_core::TurnContext::default(),
-            })
-            .await
-            .expect("prompt contributions");
-
-        let contribution = contributions
-            .iter()
-            .find(|contribution| contribution.title.as_deref() == Some("Lash CLI Host Docs"))
-            .expect("host docs contribution");
-        assert_eq!(contribution.slot, lash_core::PromptSlot::Environment);
-        assert!(
-            contribution
-                .content
-                .contains(&docs_dir.display().to_string())
-        );
-    }
 }

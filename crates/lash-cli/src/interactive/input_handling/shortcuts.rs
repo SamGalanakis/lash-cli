@@ -88,9 +88,10 @@ pub(super) async fn handle_global_shortcut_key(
         }
         if app.turn_active() {
             app.note_manual_interrupt_requested();
-            if let Some(token) = cancel_token.take() {
-                token.cancel();
-            }
+            app.timeline
+                .push_system_message_if_new(crate::util::manual_interrupt_message().to_string());
+            let process_cancel = cancel_token.take();
+            cancel_active_turn(ctx, process_cancel).await;
             return Ok(Some(false));
         }
         if !app.input().is_empty() || app.has_pending_input_payload() {
@@ -194,9 +195,11 @@ pub(super) async fn handle_global_shortcut_key(
             } else if app.turn_active() {
                 // Interrupt running session
                 app.note_manual_interrupt_requested();
-                if let Some(token) = cancel_token.take() {
-                    token.cancel();
-                }
+                app.timeline.push_system_message_if_new(
+                    crate::util::manual_interrupt_message().to_string(),
+                );
+                let process_cancel = cancel_token.take();
+                cancel_active_turn(ctx, process_cancel).await;
             }
             // When idle with no dialog: no-op
         }
@@ -204,6 +207,74 @@ pub(super) async fn handle_global_shortcut_key(
     }
 
     Ok(None)
+}
+
+async fn cancel_active_turn(
+    ctx: &mut SessionCtx<'_>,
+    process_cancel: Option<lash::CancellationToken>,
+) {
+    let Some(session_id) = ctx.runtime.as_ref().map(lash::LashSession::session_id) else {
+        if let Some(token) = process_cancel {
+            token.cancel();
+        }
+        return;
+    };
+    let Some(turn_id) = ctx.app.active_turn_id().map(ToOwned::to_owned) else {
+        if let Some(token) = process_cancel {
+            token.cancel();
+        }
+        tracing::warn!("exact turn cancellation target has not been observed");
+        return;
+    };
+    let stream_id = *ctx.active_stream_id;
+    match ctx
+        .runtime_factory
+        .cancel_active_turn(&session_id, &turn_id, process_cancel)
+        .await
+    {
+        Ok(()) => {}
+        Err(error) => {
+            tracing::warn!(stream_id, turn_id, %error, "exact turn cancellation request failed");
+        }
+    }
+}
+
+fn cancelled_input_texts(outcome: &lash::TurnCancelInputOutcome) -> Vec<String> {
+    outcome
+        .affected_inputs
+        .iter()
+        .filter(|input| matches!(input.disposition, lash::TurnCancelDisposition::Drop))
+        .map(|input| crate::app::turn_input_display_text(&input.payload))
+        .filter(|text| !text.trim().is_empty())
+        .collect()
+}
+
+fn prepend_cancelled_input_texts(current: &str, texts: &[String]) -> Option<String> {
+    if texts.is_empty() {
+        return None;
+    }
+    let restored = texts.join("\n\n");
+    Some(if current.trim().is_empty() {
+        restored
+    } else {
+        format!("{restored}\n\n{current}")
+    })
+}
+
+pub(crate) fn restore_cancelled_input_texts(app: &mut App, outcome: &lash::TurnCancelInputOutcome) {
+    let dropped_input_ids = outcome
+        .affected_inputs
+        .iter()
+        .filter(|input| matches!(input.disposition, lash::TurnCancelDisposition::Drop))
+        .map(|input| input.input_id.clone())
+        .collect::<Vec<_>>();
+    app.remove_pending_turn_inputs(&dropped_input_ids);
+    let texts = cancelled_input_texts(outcome);
+    let Some(restored) = prepend_cancelled_input_texts(app.input(), &texts) else {
+        return;
+    };
+    app.set_input(restored);
+    app.update_suggestions();
 }
 
 fn is_command_palette_shortcut(key: KeyEvent) -> bool {
@@ -324,14 +395,35 @@ pub(crate) fn command_palette_items(
         .footer("/logout"),
     );
 
+    if app.execution_mode_label == "rlm" {
+        for dialect in crate::execution_settings::RlmDialect::ALL {
+            items.push(
+                CommandPaletteItem::new(
+                    "Session",
+                    format!("New Session: {}", dialect.language_id()),
+                    format!(
+                        "Start a fresh RLM session pinned to {}.",
+                        dialect.language_id()
+                    ),
+                    CommandPaletteAction::NewSession(dialect),
+                )
+                .footer(format!("rlm · {}", dialect.language_id()))
+                .current(app.rlm_dialect_label.as_deref() == Some(dialect.language_id())),
+            );
+        }
+    } else {
+        items.push(
+            CommandPaletteItem::new(
+                "Session",
+                "New Session",
+                "Reset conversation and start fresh.",
+                CommandPaletteAction::Builtin(command::Command::Clear),
+            )
+            .footer("/clear"),
+        );
+    }
+
     items.extend([
-        CommandPaletteItem::new(
-            "Session",
-            "New Session",
-            "Reset conversation and start fresh.",
-            CommandPaletteAction::Builtin(command::Command::Clear),
-        )
-        .footer("/clear"),
         CommandPaletteItem::new(
             "Session",
             "Resume Session",
@@ -452,7 +544,7 @@ fn paste_clipboard_image(
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::is_command_palette_shortcut;
+    use super::{is_command_palette_shortcut, prepend_cancelled_input_texts};
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent {
@@ -485,5 +577,24 @@ mod tests {
             KeyCode::Char('p'),
             KeyModifiers::NONE
         )));
+    }
+
+    #[test]
+    fn cancelled_inputs_restore_ahead_of_the_current_draft() {
+        let texts = vec!["first steer".to_string(), "second steer".to_string()];
+        assert_eq!(
+            prepend_cancelled_input_texts("current draft", &texts).as_deref(),
+            Some("first steer\n\nsecond steer\n\ncurrent draft")
+        );
+    }
+
+    #[test]
+    fn cancelled_inputs_restore_without_trailing_separator_for_empty_draft() {
+        let texts = vec!["steer".to_string()];
+        assert_eq!(
+            prepend_cancelled_input_texts("", &texts).as_deref(),
+            Some("steer")
+        );
+        assert_eq!(prepend_cancelled_input_texts("draft", &[]), None);
     }
 }

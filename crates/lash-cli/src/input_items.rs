@@ -1,27 +1,23 @@
-use std::collections::HashMap;
 use std::ops::Range;
 use std::path::PathBuf;
 
 use crate::app::App;
 use crate::editor::PendingImage;
 use lash::InputItem;
+use lash::attachments::MediaType;
+use lash::direct::AttachmentSource;
 
 /// Build structured turn items from editor input:
 /// - `@path` becomes a host-prepared text marker when resolvable
 /// - `[Image #n]` binds to pasted image `n` from this turn's image list
 /// - plain text remains `Text`
-pub fn build_items_from_editor_input(
-    input: &str,
-    images: Vec<PendingImage>,
-) -> (Vec<InputItem>, HashMap<String, Vec<u8>>) {
+pub fn build_items_from_editor_input(input: &str, images: Vec<PendingImage>) -> Vec<InputItem> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut items: Vec<InputItem> = Vec::new();
-    let mut image_blobs: HashMap<String, Vec<u8>> = HashMap::new();
-    let image_slots: HashMap<usize, Vec<u8>> = images
+    let image_slots: std::collections::HashMap<usize, Vec<u8>> = images
         .into_iter()
         .map(|image| (image.id, image.png_bytes))
         .collect();
-    let mut emitted_image_ids: HashMap<usize, String> = HashMap::new();
 
     let mut text_buf = String::with_capacity(input.len());
     let mut i = 0;
@@ -32,14 +28,12 @@ pub fn build_items_from_editor_input(
             && let Some(bytes) = image_slots.get(&img_idx)
         {
             push_text_item(&mut items, &mut text_buf);
-            let id = emitted_image_ids
-                .entry(img_idx)
-                .or_insert_with(|| format!("img-{img_idx}"))
-                .clone();
-            image_blobs
-                .entry(id.clone())
-                .or_insert_with(|| bytes.clone());
-            items.push(InputItem::image_ref(id));
+            let media_type = MediaType::parse("image/png")
+                .expect("the built-in PNG media type must be syntactically valid");
+            items.push(InputItem::attachment(AttachmentSource::inline(
+                media_type,
+                bytes.clone(),
+            )));
             i = next_i;
             continue;
         }
@@ -83,7 +77,7 @@ pub fn build_items_from_editor_input(
 
     push_text_item(&mut items, &mut text_buf);
 
-    (items, image_blobs)
+    items
 }
 
 fn push_text_item(items: &mut Vec<InputItem>, text: &mut String) {

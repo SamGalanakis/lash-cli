@@ -29,10 +29,10 @@ when any non-empty session exists; show `No messages yet` when only empties exis
 
 ## Working material
 
-- One `--lash-home DIR` fixed across the run so sessions persist in `DIR/sessions/*.db`.
+- One `--lash-home DIR` fixed across the run so sessions persist in the unified
+  `DIR/store/durable-core.db` catalog and picker metadata in `DIR/sessions/*.ui.json`.
   Seed with `/clear`, which persists the current session and opens a fresh one, printing
-  `Started new session: <name>`. Space each `/clear` with `wait 2` — session filenames are
-  `YYYYMMDD_HHMMSS.db`, so rolls within one second collide.
+  `Started new session: <name>`.
 - Non-empty seed: submit `hello from pty` (its user row makes the session's `message_count
   > 0` and its picker preview `hello from pty`).
 
@@ -54,13 +54,15 @@ expect 10 Started new session
 ```
 
 You are now in an **empty** session (call it B) with the non-empty session A persisted. Read
-B's on-disk identity before rolling past it — open `/info` and record the `session db`
-path's basename (`<B>.db`) from the **Paths** section:
+B's catalog identity before rolling past it: open `/info`, gate on the **Session** section,
+then record the separate `name <adjective-noun>` and `id <uuid>` rows:
 
 ```
+clear
 type /info
 key enter
-expect 10 session db
+expect 10 Session
+expect 10 id
 screen 40
 key esc
 ```
@@ -95,25 +97,26 @@ violation → Abort/RCA.
 
 ## Phase 3 — Direct-target escape hatch
 
-Target the hidden empty session B directly by its `.db` filename (from Phase 1):
+Target the hidden empty session B directly by its catalog id (from Phase 1):
 
 ```
 clear
-type /resume <B>.db
+type /resume <B>
 key enter
-expect 10 Resumed: <B>.db
+expect 10 Resumed: <B>
 ```
 
-Gate: `Resumed: <B>.db` — the picker suppressed B, but the direct form reached it.
+Gate: `Resumed: <B>` — the picker suppressed B, but the direct form reached it.
 
 **Rigor (contract check on the identifier surface).** CONTEXT.md → "Operator UI" and
 `docs/index.html` present `/resume <id-or-name>` as accepting the session **id or
-human-readable name** too, not only the `.db` filename. As a rigor case, also drive
+human-readable name**. As a rigor case, also drive
 `/resume <B-session-name>` (the `name` shown by `/info`). If it returns `Could not resolve
 session ...`, that is a divergence between the documented identifier surface and the CLI —
 **report it as a finding** (RCA it to the resume-identifier resolution path), and do **not**
-edit the doc or code to hide it. Filename resolution passing is the escape-hatch gate;
-name/id resolution is the rigor case.
+edit the doc or code to hide it. Catalog-id resolution is the escape-hatch gate; name
+resolution is the rigor case. Legacy per-session database filename targets are intentionally
+refused.
 
 ## Phase 4 — Only-empty store
 
@@ -147,9 +150,9 @@ thing to resume. Then `kill`.
 |------|----------------|---------|-------|
 | Hides empty when non-empty exists | `Resume Session (1/1)`, only `hello from pty`, no `No messages yet` |  |  |
 | Current session excluded | current session absent from the list |  |  |
-| Direct target reaches hidden session | `Resumed: <B>.db` |  |  |
+| Direct target reaches hidden session | `Resumed: <B>` |  |  |
 | Only-empty shows all | every row `No messages yet` |  |  |
-| Identifier surface (rigor) | name/id resolves, or reported as a doc/CLI divergence |  |  |
+| Identifier surface (rigor) | `/info` renders `Session`, then separate `name <adjective-noun>` and `id <uuid>` rows |  |  |
 
 **Aggregate:** does the picker hide zero-turn sessions only when a non-empty exists, show
 `No messages yet` when only empties exist, exclude the current session, and does the direct

@@ -43,6 +43,7 @@ pub struct HarnessConfig {
     pub lash_home: Option<PathBuf>,
     pub output_dir: PathBuf,
     pub execution_mode: ExecutionMode,
+    pub rlm_dialect: Option<String>,
     pub model: Option<String>,
     pub rows: u16,
     pub cols: u16,
@@ -61,6 +62,7 @@ impl HarnessConfig {
             lash_home: None,
             output_dir: default_output_dir(),
             execution_mode: ExecutionMode::Standard,
+            rlm_dialect: None,
             model: None,
             rows: 40,
             cols: 120,
@@ -130,6 +132,7 @@ pub struct SnapshotPaths {
 struct HarnessMetadata<'a> {
     success: bool,
     execution_mode: ExecutionMode,
+    rlm_dialect: Option<&'a str>,
     model: Option<&'a str>,
     working_dir: Option<&'a Path>,
     lash_home: Option<&'a Path>,
@@ -223,6 +226,12 @@ impl LiveHarness {
 
     pub fn wait_for_text(&mut self, needle: &str, timeout: Duration) -> Result<String> {
         self.wait_until(needle, timeout, |visible| visible.contains(needle))
+    }
+
+    pub fn wait_for_text_while_idle(&mut self, needle: &str, timeout: Duration) -> Result<String> {
+        self.wait_until(needle, timeout, |visible| {
+            visible.contains(needle) && visible_run_state_is_idle(visible)
+        })
     }
 
     pub fn wait_idle(&mut self, timeout: Duration) -> Result<String> {
@@ -467,6 +476,10 @@ fn lash_command_args(config: &HarnessConfig, artifacts: &HarnessArtifacts) -> Ve
         "--debug-ui-trace-interval-ms".to_string(),
         config.snapshot_interval.as_millis().to_string(),
     ]);
+    if let Some(dialect) = &config.rlm_dialect {
+        args.push("--rlm-dialect".to_string());
+        args.push(dialect.clone());
+    }
     args
 }
 
@@ -686,6 +699,7 @@ fn write_metadata(
     let metadata = HarnessMetadata {
         success,
         execution_mode: config.execution_mode,
+        rlm_dialect: config.rlm_dialect.as_deref(),
         model: config.model.as_deref(),
         working_dir: config.working_dir.as_deref(),
         lash_home: config.lash_home.as_deref(),

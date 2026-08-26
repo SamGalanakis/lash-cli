@@ -35,7 +35,7 @@ pub struct LlmPromptSnapshot {
     pub protocol_iteration: Option<u64>,
     pub llm_call_id: Option<String>,
     /// Typed causal source from `context.metadata.caused_by`.
-    pub caused_by: Option<lash_core::CausalRef>,
+    pub caused_by: Option<lash::process::CausalRef>,
     pub timestamp: Option<String>,
     pub model: Option<String>,
     pub model_variant: Option<String>,
@@ -274,6 +274,7 @@ fn short_hash(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use lash_trace::{TraceContext, TraceLlmMessage, TraceRecord};
     use std::io::Write;
 
@@ -348,6 +349,7 @@ mod tests {
                     duration_ms: 1234,
                     terminal_reason: None,
                     parts: None,
+                    generation_disposition: None,
                 },
                 usage: Some(TraceTokenUsage {
                     input_tokens: 100,
@@ -358,6 +360,7 @@ mod tests {
                 }),
                 provider_usage: None,
                 stream_summary: None,
+                attempts: None,
             },
         );
         write_records(&mut tmp, &[started, completed]);
@@ -422,7 +425,8 @@ mod tests {
         writeln!(tmp, "not json").unwrap();
         writeln!(
             tmp,
-            r#"{{"schema_version":2,"id":"x","timestamp":"t","context":{{}},"type":"future_event","payload":{{}}}}"#
+            r#"{{"schema_version":{},"id":"x","timestamp":"t","context":{{}},"type":"future_event","payload":{{}}}}"#,
+            lash_trace::TRACE_SCHEMA_VERSION
         )
         .unwrap();
         let started = TraceRecord::new(
@@ -471,6 +475,7 @@ mod tests {
                         duration_ms: 1,
                         terminal_reason: None,
                         parts: None,
+                        generation_disposition: None,
                     },
                     usage: Some(TraceTokenUsage {
                         input_tokens: input,
@@ -481,6 +486,7 @@ mod tests {
                     }),
                     provider_usage: None,
                     stream_summary: None,
+                    attempts: None,
                 },
             ));
         }

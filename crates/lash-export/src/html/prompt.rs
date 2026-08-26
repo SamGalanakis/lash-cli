@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write as _;
 
-use lash_core::ChronologicalPayload;
-use lash_core::session_model::MessageRole;
+use lash::messages::MessageRole;
+use lash::persistence::{ChronologicalEntry, ChronologicalPayload};
 
 use crate::trace::LlmPromptSnapshot;
 use crate::transcript::{format_count, format_tokens, lashlang_transcript_step_from_event};
@@ -86,7 +86,7 @@ pub(crate) fn compute_coalesce_states(
 }
 
 pub(crate) fn compute_prompt_insertions(
-    chronological: &[lash_core::ChronologicalEntry],
+    chronological: &[ChronologicalEntry],
     prompts: &[LlmPromptSnapshot],
 ) -> PromptInsertions {
     let mut before_index = vec![Vec::new(); chronological.len()];

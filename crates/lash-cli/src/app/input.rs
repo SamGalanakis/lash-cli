@@ -519,9 +519,21 @@ impl App {
         }
     }
 
+    #[cfg(test)]
     pub fn show_session_picker(&mut self, items: Vec<crate::session_log::SessionInfo>) {
+        self.show_session_picker_with_incompatible(items, 0);
+    }
+
+    pub fn show_session_picker_with_incompatible(
+        &mut self,
+        items: Vec<crate::session_log::SessionInfo>,
+        incompatible_session_count: usize,
+    ) {
         self.overlay = Some(OverlayState::SessionPicker(
-            crate::overlay::SessionPickerState::new(items),
+            crate::overlay::SessionPickerState::with_incompatible_sessions(
+                items,
+                incompatible_session_count,
+            ),
         ));
         self.dirty = true;
     }
@@ -551,7 +563,7 @@ impl App {
         self.overlay = Some(OverlayState::SkillPicker(PickerState::new(items)));
     }
 
-    pub fn show_tree(&mut self, roots: Vec<lash_core::SessionMessageTreeNode>) {
+    pub fn show_tree(&mut self, roots: Vec<crate::tree::SessionMessageTreeNode>) {
         self.overlay = Some(OverlayState::Tree(crate::overlay::TreeState::new(roots)));
     }
 

@@ -981,7 +981,7 @@ mod tests {
 
         fn handle_turn_event(&self, event: &TurnEvent) -> Vec<TuiHostEffect> {
             match event {
-                TurnEvent::AssistantProseDelta { text } if text == "mount" => vec![
+                TurnEvent::AssistantProseDelta { text } if text.as_ref() == "mount" => vec![
                     TuiHostEffect::MountSurface {
                         spec: TuiSurfaceSpec {
                             key: "workspace".to_string(),
@@ -1008,7 +1008,7 @@ mod tests {
                         key: "workspace".to_string(),
                     },
                 ],
-                TurnEvent::AssistantProseDelta { text } if text == "overlay" => vec![
+                TurnEvent::AssistantProseDelta { text } if text.as_ref() == "overlay" => vec![
                     TuiHostEffect::MountSurface {
                         spec: TuiSurfaceSpec {
                             key: "overlay".to_string(),
@@ -1027,7 +1027,7 @@ mod tests {
                         key: "overlay".to_string(),
                     },
                 ],
-                TurnEvent::AssistantProseDelta { text } if text == "close" => vec![
+                TurnEvent::AssistantProseDelta { text } if text.as_ref() == "close" => vec![
                     TuiHostEffect::BlurSurface {
                         key: "overlay".to_string(),
                     },
@@ -1046,7 +1046,7 @@ mod tests {
         let extensions = TuiExtensions::new(vec![harness]).expect("surface harness");
 
         extensions.effects_for_turn_event(&TurnEvent::AssistantProseDelta {
-            text: "mount".to_string(),
+            text: "mount".into(),
         });
         assert_eq!(
             extensions.focused_surface().as_deref(),
@@ -1059,7 +1059,7 @@ mod tests {
         assert_eq!(extensions.mounted_surfaces(TuiSurfaceSlot::Footer).len(), 1);
 
         extensions.effects_for_turn_event(&TurnEvent::AssistantProseDelta {
-            text: "overlay".to_string(),
+            text: "overlay".into(),
         });
         assert_eq!(
             extensions.focused_surface().as_deref(),
@@ -1067,7 +1067,7 @@ mod tests {
         );
 
         extensions.effects_for_turn_event(&TurnEvent::AssistantProseDelta {
-            text: "close".to_string(),
+            text: "close".into(),
         });
         assert_eq!(
             extensions.focused_surface().as_deref(),
@@ -1081,7 +1081,7 @@ mod tests {
         let extensions = TuiExtensions::new(vec![Arc::clone(&harness) as Arc<dyn TuiExtension>])
             .expect("surface harness");
         extensions.effects_for_turn_event(&TurnEvent::AssistantProseDelta {
-            text: "mount".to_string(),
+            text: "mount".into(),
         });
         let workspace = extensions
             .mounted_surfaces(TuiSurfaceSlot::Workspace)

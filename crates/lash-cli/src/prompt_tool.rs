@@ -1,10 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use lash::tools::{LashlangToolBinding, ToolDefinitionLashlangExt};
-use lash_core::plugin::StaticPluginFactory;
-use lash_core::{
-    PluginError, PluginFactory, PluginSpec, ToolCall, ToolContract, ToolDefinition, ToolManifest,
-    ToolProvider, ToolResult, ToolScheduling,
+use lash::plugins::{PluginError, PluginFactory, PluginSpec, StaticPluginFactory};
+use lash::tools::{
+    ToolBinding, ToolCall, ToolContract, ToolDefinition, ToolDefinitionBindingExt, ToolManifest,
+    ToolOutcome, ToolProvider,
 };
 use serde_json::json;
 
@@ -44,29 +43,6 @@ impl CliPromptBridge {
     }
 }
 
-#[async_trait::async_trait]
-impl lash_plugin_plan_mode::PlanModePrompt for CliPromptBridge {
-    async fn prompt_user(
-        &self,
-        request: lash_plugin_plan_mode::PlanModePromptRequest,
-    ) -> Result<lash_plugin_plan_mode::PlanModePromptResponse, PluginError> {
-        let mut cli_request = PromptRequest::single(request.question, request.options);
-        if let Some(review) = request.review {
-            cli_request = cli_request.with_markdown_panel(review.title, review.markdown);
-        }
-        if request.allow_note {
-            cli_request = cli_request.with_optional_note();
-        }
-        let response = self.prompt_user(cli_request).await?;
-        let (selection, note) = match response {
-            PromptResponse::Single { selection, note } => (selection, note),
-            PromptResponse::Multi { selections, note } => (selections.join(", "), note),
-            PromptResponse::Text { text } => (text, None),
-        };
-        Ok(lash_plugin_plan_mode::PlanModePromptResponse::Single { selection, note })
-    }
-}
-
 #[derive(Clone)]
 struct CliAskTool {
     prompt: CliPromptBridge,
@@ -77,7 +53,7 @@ impl CliAskTool {
         Self { prompt }
     }
 
-    async fn execute_ask(&self, args: &serde_json::Value) -> ToolResult {
+    async fn execute_ask(&self, args: &serde_json::Value) -> ToolOutcome {
         let question = match require_str(args, "question") {
             Ok(question) => question,
             Err(err) => return err,
@@ -109,8 +85,8 @@ impl CliAskTool {
         };
 
         match self.prompt.prompt_user(request).await {
-            Ok(answer) => ToolResult::ok(json!(answer)),
-            Err(err) => ToolResult::err(json!(err.to_string())),
+            Ok(answer) => ToolOutcome::ok(json!(answer)),
+            Err(err) => ToolOutcome::err(json!(err.to_string())),
         }
     }
 }
@@ -125,10 +101,10 @@ impl ToolProvider for CliAskTool {
         (name == "ask").then(|| Arc::new(ask_tool_definition().contract()))
     }
 
-    async fn execute(&self, call: ToolCall<'_>) -> ToolResult {
+    async fn execute(&self, call: ToolCall<'_>) -> ToolOutcome {
         match call.name {
             "ask" => self.execute_ask(call.args).await,
-            other => ToolResult::err_fmt(format_args!("Unknown tool: {other}")),
+            other => ToolOutcome::err_fmt(format_args!("Unknown tool: {other}")),
         }
     }
 }
@@ -165,11 +141,10 @@ fn ask_tool_definition() -> ToolDefinition {
                     .into(),
                 "await user.ask({ question: \"Which checks should I run?\", options: [\"unit\", \"lint\", \"e2e\"], selection_mode: \"multi\" })?".into(),
             ])
-            .with_lashlang_binding(
-                LashlangToolBinding::new(["user"], "ask")
+            .with_tool_binding(
+                ToolBinding::new(["user"], "ask")
                     .with_aliases(["prompt_user", "request_input"]),
             )
-            .with_scheduling(ToolScheduling::Parallel)
 }
 
 fn ask_output_schema() -> serde_json::Value {
@@ -218,11 +193,11 @@ pub(crate) fn cli_ask_plugin_factory(prompt: CliPromptBridge) -> Arc<dyn PluginF
     ))
 }
 
-fn require_str<'a>(args: &'a serde_json::Value, name: &str) -> Result<&'a str, ToolResult> {
+fn require_str<'a>(args: &'a serde_json::Value, name: &str) -> Result<&'a str, ToolOutcome> {
     args.get(name)
         .and_then(serde_json::Value::as_str)
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| ToolResult::err_fmt(format!("Invalid {name}: expected non-empty string")))
+        .ok_or_else(|| ToolOutcome::err_fmt(format!("Invalid {name}: expected non-empty string")))
 }
 
 fn object_schema(properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
@@ -234,7 +209,7 @@ fn object_schema(properties: serde_json::Value, required: &[&str]) -> serde_json
     })
 }
 
-fn parse_options(args: &serde_json::Value) -> Result<Vec<String>, ToolResult> {
+fn parse_options(args: &serde_json::Value) -> Result<Vec<String>, ToolOutcome> {
     let Some(value) = args.get("options") else {
         return Ok(Vec::new());
     };
@@ -242,19 +217,19 @@ fn parse_options(args: &serde_json::Value) -> Result<Vec<String>, ToolResult> {
         return Ok(Vec::new());
     }
     let Some(items) = value.as_array() else {
-        return Err(ToolResult::err_fmt(
+        return Err(ToolOutcome::err_fmt(
             "Invalid options: expected list of strings",
         ));
     };
     let mut out = Vec::with_capacity(items.len());
     for (idx, item) in items.iter().enumerate() {
         let Some(option) = item.as_str() else {
-            return Err(ToolResult::err_fmt(format!(
+            return Err(ToolOutcome::err_fmt(format!(
                 "Invalid options[{idx}]: expected non-empty string"
             )));
         };
         if option.trim().is_empty() {
-            return Err(ToolResult::err_fmt(format!(
+            return Err(ToolOutcome::err_fmt(format!(
                 "Invalid options[{idx}]: expected non-empty string"
             )));
         }
@@ -266,12 +241,12 @@ fn parse_options(args: &serde_json::Value) -> Result<Vec<String>, ToolResult> {
 fn parse_selection_mode(
     args: &serde_json::Value,
     has_options: bool,
-) -> Result<PromptSelectionMode, ToolResult> {
+) -> Result<PromptSelectionMode, ToolOutcome> {
     let Some(value) = args.get("selection_mode") else {
         return Ok(PromptSelectionMode::Single);
     };
     let Some(mode) = value.as_str() else {
-        return Err(ToolResult::err_fmt(
+        return Err(ToolOutcome::err_fmt(
             "Invalid selection_mode: expected \"single\" or \"multi\"",
         ));
     };
@@ -279,20 +254,20 @@ fn parse_selection_mode(
         "single" => PromptSelectionMode::Single,
         "multi" => PromptSelectionMode::Multi,
         _ => {
-            return Err(ToolResult::err_fmt(
+            return Err(ToolOutcome::err_fmt(
                 "Invalid selection_mode: expected \"single\" or \"multi\"",
             ));
         }
     };
     if !has_options && matches!(selection_mode, PromptSelectionMode::Multi) {
-        return Err(ToolResult::err_fmt(
+        return Err(ToolOutcome::err_fmt(
             "Invalid selection_mode: \"multi\" requires non-empty options",
         ));
     }
     Ok(selection_mode)
 }
 
-fn parse_allow_note(args: &serde_json::Value, has_options: bool) -> Result<bool, ToolResult> {
+fn parse_allow_note(args: &serde_json::Value, has_options: bool) -> Result<bool, ToolOutcome> {
     let Some(value) = args.get("allow_note") else {
         return Ok(false);
     };
@@ -300,12 +275,12 @@ fn parse_allow_note(args: &serde_json::Value, has_options: bool) -> Result<bool,
         return Ok(false);
     }
     let Some(allow_note) = value.as_bool() else {
-        return Err(ToolResult::err_fmt(
+        return Err(ToolOutcome::err_fmt(
             "Invalid allow_note: expected true or false",
         ));
     };
     if allow_note && !has_options {
-        return Err(ToolResult::err_fmt(
+        return Err(ToolOutcome::err_fmt(
             "Invalid allow_note: requires non-empty options",
         ));
     }

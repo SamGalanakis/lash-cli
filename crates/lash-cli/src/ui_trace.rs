@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use lash_core::{TurnActivity, TurnEvent};
+use lash::{TurnActivity, TurnEvent};
 use lash_tui::{PerfCounters, ScreenSnapshot};
 use serde::{Deserialize, Serialize};
 
@@ -43,16 +43,6 @@ impl TraceRepoStatus {
             repo_name: status.repo_name.clone(),
             branch: status.branch.clone(),
             worktree: status.worktree.clone(),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn into_repo_status(self, cwd: &str) -> RepoStatus {
-        RepoStatus {
-            repo_root: PathBuf::from(cwd),
-            repo_name: self.repo_name,
-            branch: self.branch,
-            worktree: self.worktree,
         }
     }
 }
@@ -539,7 +529,7 @@ mod tests {
         recorder.record_user_turn(&PreparedTurn::new("hello".into(), Vec::new()));
         recorder.record_start_turn();
         recorder.record_turn_activity(&TurnActivity::new(
-            lash_core::TurnActivityId::new("assistant"),
+            lash::TurnActivityId::new("assistant"),
             TurnEvent::AssistantProseDelta {
                 text: "world".into(),
             },
@@ -565,7 +555,7 @@ mod tests {
             .expect("recorded turn activity op");
         assert!(matches!(
             &event_op.event,
-            TurnEvent::AssistantProseDelta { text } if text == "world"
+            TurnEvent::AssistantProseDelta { text } if text.as_ref() == "world"
         ));
         assert!(matches!(
             trace.ops.last(),

@@ -1,6 +1,6 @@
 //! Host-side model-capability catalog.
 //!
-//! Capability is host-supplied data on [`ModelSpec`](lash_core::ModelSpec): the
+//! Capability is host-supplied data on [`ModelSpec`](lash::ModelSpec): the
 //! effort levels a model exposes, the default effort, alias clamps, and how the
 //! effort encodes on the wire. lash-core validates a requested variant against
 //! this and the provider consumes it — providers no longer sniff model names.
@@ -14,7 +14,7 @@
 //! Adding a model means adding a row. No model-name capability logic lives
 //! anywhere else in the CLI.
 
-use lash_core::{
+use lash::provider::{
     CacheControlDialect, ModelCapability, ReasoningCapability, ReasoningDisableEncoding,
     ReasoningEncoding,
 };
@@ -115,6 +115,7 @@ impl Row {
             }),
             cache_control: self.cache_control,
             stream_termination: None,
+            sampling: Default::default(),
         }
     }
 }

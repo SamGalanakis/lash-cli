@@ -3,6 +3,20 @@
 
 use crate::Args;
 
+pub(super) async fn probe_runtime_store() -> anyhow::Result<lash::preflight::PreflightReport> {
+    let handle =
+        lash_sqlite_store::SqliteStorePreflight::for_durable_core(crate::paths::durable_core_db())
+            .with_process_registry(crate::paths::processes_db())
+            .with_trigger_store(crate::paths::triggers_db())
+            .with_effect_journal(crate::paths::effects_db());
+    let report =
+        lash::preflight::probe_store(&handle, lash::preflight::PreflightOptions::summary()).await?;
+    if let Some(message) = report.refusal_message() {
+        anyhow::bail!(message);
+    }
+    Ok(report)
+}
+
 /// Handle flags that complete without starting a session. Returns `true`
 /// when the process should exit successfully without continuing startup.
 pub(super) async fn handle_early_exit_flags(args: &Args) -> anyhow::Result<bool> {
@@ -24,8 +38,7 @@ pub(super) async fn handle_early_exit_flags(args: &Args) -> anyhow::Result<bool>
     Ok(false)
 }
 
-/// `--reset`: confirm, then delete all lash data (config, credentials,
-/// sessions, caches).
+/// `--reset`: confirm, then delete the unified store and host session roster.
 fn run_reset() -> anyhow::Result<()> {
     use std::io::Write;
 
@@ -38,21 +51,21 @@ fn run_reset() -> anyhow::Result<()> {
     const BOLD: &str = "\x1b[1m";
     const RESET: &str = "\x1b[0m";
 
-    let lash_dir = crate::paths::lash_home();
-    let cache_dir = crate::paths::lash_cache_dir();
+    let store_dir = crate::paths::store_dir();
+    let sessions_dir = crate::session_log::sessions_dir();
 
     eprintln!();
     eprintln!("  {SODIUM}{BOLD}/ reset{RESET}");
     eprintln!();
-    eprintln!("  {ERR}This will permanently delete all lash data:{RESET}");
+    eprintln!("  {ERR}This will permanently delete Lash runtime data:{RESET}");
     eprintln!();
     eprintln!(
-        "    {ASH_TEXT}config, credentials   {CHALK}{}{RESET}",
-        lash_dir.display()
+        "    {ASH_TEXT}durable store         {CHALK}{}{RESET}",
+        store_dir.display()
     );
     eprintln!(
-        "    {ASH_TEXT}runtime cache          {CHALK}{}{RESET}",
-        cache_dir.display()
+        "    {ASH_TEXT}session roster        {CHALK}{}{RESET}",
+        sessions_dir.display()
     );
     eprintln!();
     eprint!("  {SODIUM}Are you sure? [y/N]{RESET} ");
@@ -61,13 +74,13 @@ fn run_reset() -> anyhow::Result<()> {
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
     if answer.trim().eq_ignore_ascii_case("y") {
-        if lash_dir.exists() {
-            std::fs::remove_dir_all(&lash_dir)?;
+        if store_dir.exists() {
+            std::fs::remove_dir_all(&store_dir)?;
         }
-        if cache_dir.exists() {
-            std::fs::remove_dir_all(&cache_dir)?;
+        if sessions_dir.exists() {
+            std::fs::remove_dir_all(&sessions_dir)?;
         }
-        eprintln!("  {LICHEN}Done.{RESET} All data removed.");
+        eprintln!("  {LICHEN}Done.{RESET} Runtime store and session roster removed.");
     } else {
         eprintln!("  {ASH_TEXT}Aborted.{RESET}");
     }

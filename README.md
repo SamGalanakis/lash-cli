@@ -34,9 +34,11 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
-Lash dependencies are pinned to one exact upstream revision in the workspace
-manifest. Update that revision deliberately and verify this entire workspace.
+Lash dependencies are pinned to one exact commit on Lash `main`, never
+to a release tag. Update that revision deliberately and verify this entire workspace.
 
-The user-facing command, configuration directory (`~/.lash`), and session
-format remain `lash`; splitting the repository does not rename the product or
-invalidate existing installations.
+The user-facing command and configuration directory (`~/.lash`) remain `lash`.
+Sessions are discovered from the unified Lash catalog; CLI sidecars supply only
+display metadata. The pinned durable compatibility markers are session schema
+41, trace schema 9, and remote protocol 46. Alpha-era per-session `.db` files
+are diagnosed as incompatible and refused rather than opened.

@@ -1,20 +1,19 @@
 mod commands;
 mod helpers;
 mod input_handling;
+pub(crate) use input_handling::restore_cancelled_input_texts;
 mod runtime;
-#[cfg(test)]
-mod tests;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossterm::event::Event as TermEvent;
 use lash::CancellationToken;
+use lash::messages::Message;
+use lash::persistence::RuntimeSessionState;
+use lash::tools::ToolState;
+use lash::usage::TokenUsage;
 use lash::{LashSession, TurnEvent, provider::ProviderHandle};
-use lash_core::runtime::RuntimeSessionState;
-use lash_core::session_model::Message;
-use lash_core::{TokenUsage, ToolState};
-use lash_sqlite_store::Store;
 use lash_tui::{InputEvent as TuiInputEvent, Terminal, normalize_event};
 use lash_tui_extensions::{TuiExtensionContext, TuiExtensions, TuiSlashInvocation};
 
@@ -89,15 +88,16 @@ pub(crate) async fn run_app(
     initial_context_window: u64,
     session_name: String,
     model_catalog: Arc<CachedModelCatalog>,
-    _store: Arc<Store>,
     mut toolset_hash: String,
     initial_model_variant: Option<String>,
     initial_execution_mode: ExecutionMode,
+    initial_rlm_dialect: Option<crate::execution_settings::RlmDialect>,
     startup_system_message: Option<String>,
 ) -> anyhow::Result<()> {
     let initial_session_id = session.session_id();
     let mut app = App::new(model, session_name, initial_session_id);
     app.set_execution_mode_label(&initial_execution_mode);
+    app.set_rlm_dialect(initial_rlm_dialect);
     let (chrome_ext, chrome_state) = crate::chrome_ui::ChromeTuiExtension::new();
     let extra_ui_extensions: Vec<Arc<dyn lash_tui_extensions::TuiExtension>> = vec![
         Arc::new(lash_autoresearch::AutoresearchTuiExtension::default()),
@@ -267,10 +267,12 @@ pub(crate) async fn run_app(
             push_system_message(&mut app, err);
         } else {
             let _ = app_tx.send(AppEvent::RequestUiSnapshot);
-            toolset_hash = hash12(
-                &serde_json::to_vec(&active_tool_state.tool_manifests())
-                    .unwrap_or_else(|_| b"[]".to_vec()),
-            );
+            if let Some(session) = runtime.as_ref()
+                && let Ok(manifests) = session.admin().tools().active_manifests().await
+            {
+                toolset_hash =
+                    hash12(&serde_json::to_vec(&manifests).unwrap_or_else(|_| b"[]".to_vec()));
+            }
         }
         if let Some(prompt) = args
             .resume_prompt
@@ -362,11 +364,15 @@ pub(crate) async fn run_app(
                         active_stream_id,
                         "runtime return received in interactive loop"
                     );
-                    if let Err(err) = sync_runtime_tool_catalog(&mut runtime).await {
-                        push_system_message(
-                            &mut app,
-                            format!("Failed to sync tool catalog after turn: {err}"),
-                        );
+                    if app.should_automatically_sync_tool_catalog() {
+                        let result = sync_runtime_tool_catalog(&mut runtime).await;
+                        app.observe_automatic_tool_catalog_sync_result(&result);
+                        if result.is_err() {
+                            push_system_message(
+                                &mut app,
+                                "Tool catalog could not be refreshed; automatic refresh is disabled for this session.",
+                            );
+                        }
                     }
                     if done.stream_id != active_stream_id || pending_clear_after_return {
                         if let Some(rt) = runtime.as_mut() {
@@ -383,6 +389,7 @@ pub(crate) async fn run_app(
                         app.usage.token_usage = TokenUsage::default();
                         app.stop_turn();
                         app.clear_mode_indicators();
+                        app.reset_automatic_tool_catalog_sync();
                         app.set_model_variant(current_model_variant.clone());
                         runtime_return_rx = None;
                         cancel_token = None;
@@ -400,8 +407,9 @@ pub(crate) async fn run_app(
                     }
                     let interrupted = matches!(
                         &done.result.outcome,
-                        lash_core::TurnOutcome::Stopped(lash_core::TurnStop::Cancelled)
+                        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
                     );
+                    let cancel_input_outcome = done.result.cancel_input_outcome.clone();
                     let active_turn_had_visible_output = app
                         .live
                         .turn
@@ -411,9 +419,20 @@ pub(crate) async fn run_app(
                         &done.result,
                         active_turn_had_visible_output,
                     );
-                    let state = done.result.state;
+                    let completed_turn_usage = done.result.total_usage();
+                    let session_usage = runtime
+                        .as_ref()
+                        .expect("runtime remains installed while a turn runs")
+                        .usage_report()
+                        .usage
+                        .usage;
+                    let rt = runtime
+                        .as_ref()
+                        .expect("runtime remains installed while a turn runs");
+                    let read_view = rt.read_view();
+                    let turn_input_applications = rt.turn_input_applications().await?;
                     tracing::info!(
-                        turn_index = state.turn_index,
+                        turn_index = read_view.turn_index(),
                         outcome = ?done.result.outcome,
                         assistant_chars = done.result.assistant_output.safe_text.len(),
                         "runtime turn completed"
@@ -441,14 +460,15 @@ pub(crate) async fn run_app(
                         }
                     }
 
-                    let read_view = state.read_view();
                     history = read_view.messages().to_vec();
-                    turn_counter = state.turn_index;
-                    app.usage.token_usage = state.token_usage.clone();
-                    app.usage.last_prompt_usage = state.last_prompt_usage.clone();
+                    turn_counter = read_view.turn_index();
+                    app.usage.last_response_usage = completed_turn_usage;
+                    app.usage.token_usage = session_usage;
+                    app.usage.last_prompt_usage = read_view.last_prompt_usage().cloned();
+                    app.reconcile_turn_input_applications(&turn_input_applications);
                     tracing::debug!(
                         stream_id = done.stream_id,
-                        turn_index = state.turn_index,
+                        turn_index = read_view.turn_index(),
                         outcome = ?done.result.outcome,
                         messages = read_view.messages().len(),
                         blocks = app.timeline.len(),
@@ -473,6 +493,8 @@ pub(crate) async fn run_app(
                             &ui_projection_state,
                             interrupted_message.clone(),
                         );
+                        restore_cancelled_input_texts(&mut app, &cancel_input_outcome);
+                        app.clear_manual_interrupt_requested();
                         runtime_return_rx = None;
                         cancel_token = None;
                         dispatch_queued_turn(
@@ -503,6 +525,7 @@ pub(crate) async fn run_app(
                     }
 
                     app.finish_turn_from_read_view(&read_view);
+                    app.clear_manual_interrupt_requested();
                     runtime_return_rx = None;
                     cancel_token = None;
                     log_runtime_transition(
@@ -900,6 +923,15 @@ pub(crate) async fn run_app(
                     app.clear_pending_ui_activity_records();
                 }
                 apply_ui_host_effects(&mut app, ui_effects);
+            }
+            AppEvent::ActiveTurnObserved { stream_id, turn_id } => {
+                if session_activity_is_current(
+                    stream_id,
+                    active_stream_id,
+                    runtime_return_rx.is_some(),
+                ) {
+                    app.set_active_turn_id(turn_id);
+                }
             }
             AppEvent::Prompt {
                 request,

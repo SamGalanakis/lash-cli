@@ -27,7 +27,13 @@ fn save_model_default(
 ) {
     let mut cfg = match LashConfig::load(&crate::paths::config_file()) {
         Some(cfg) => cfg,
-        None => LashConfig::new(provider),
+        None => {
+            push_system_message(
+                app,
+                "Model updated, but no provider config is available to save the default.",
+            );
+            return;
+        }
     };
     cfg.set_model_default(provider.kind(), model.to_string(), variant);
     if let Err(err) = cfg.save(&crate::paths::config_file()) {
@@ -40,10 +46,9 @@ fn save_model_default(
 
 fn persist_provider_config(
     cfg: &mut LashConfig,
-    provider: &ProviderHandle,
+    _provider: &ProviderHandle,
     path: &std::path::Path,
 ) -> std::io::Result<()> {
-    cfg.upsert_provider(provider);
     cfg.save(path)
 }
 
@@ -102,15 +107,18 @@ pub(super) async fn handle_model(
             return Ok(false);
         }
     };
-    if let Some(rt) = runtime.as_mut() {
-        let _ = rt
+    if let Some(rt) = runtime.as_mut()
+        && let Err(error) = rt
             .admin()
             .config()
             .update(SessionConfigPatch {
                 model: Some(model_spec),
                 ..SessionConfigPatch::default()
             })
-            .await;
+            .await
+    {
+        push_system_message(app, format!("Model update failed to settle: {error}"));
+        return Ok(false);
     }
     *current_model_variant = model_variant;
     app.usage.context_window = Some(resolved_model_spec.context_window());
@@ -167,14 +175,18 @@ pub(super) async fn handle_variant(
         let mut model_spec = rt.policy_snapshot().model;
         model_spec.variant =
             crate::model_selection::reasoning_selection_from_variant(variant.clone());
-        let _ = rt
+        if let Err(error) = rt
             .admin()
             .config()
             .update(SessionConfigPatch {
                 model: Some(model_spec),
                 ..SessionConfigPatch::default()
             })
-            .await;
+            .await
+        {
+            push_system_message(app, format!("Variant update failed to settle: {error}"));
+            return Ok(false);
+        }
     }
     *current_model_variant = variant;
     app.set_model_variant(current_model_variant.clone());
@@ -205,7 +217,14 @@ pub(super) fn handle_mode(
             app,
             format!(
                 "Current execution mode: `{}`\nThis is locked for the current session.\nStart a new session to use a different mode.\nUsage: `/mode {}`",
-                execution_mode_label(current_execution_mode),
+                if let Some(dialect) = app.rlm_dialect_label.as_deref() {
+                    format!(
+                        "{} · {dialect}",
+                        execution_mode_label(current_execution_mode)
+                    )
+                } else {
+                    execution_mode_label(current_execution_mode).to_string()
+                },
                 execution_mode_usage()
             ),
         );
@@ -403,8 +422,8 @@ pub(super) async fn handle_change_provider(
                     return Ok(false);
                 }
             };
-            if let Some(rt) = runtime.as_mut() {
-                let _ = rt
+            if let Some(rt) = runtime.as_mut()
+                && let Err(error) = rt
                     .admin()
                     .config()
                     .update(SessionConfigPatch {
@@ -412,7 +431,15 @@ pub(super) async fn handle_change_provider(
                         model: Some(model_spec),
                         ..SessionConfigPatch::default()
                     })
-                    .await;
+                    .await
+            {
+                push_system_message(app, format!("Provider update failed to settle: {error}"));
+                *provider = previous_provider;
+                app.model = previous_model;
+                app.usage.context_window = previous_context_window;
+                *current_model_variant = previous_variant;
+                app.set_model_variant(current_model_variant.clone());
+                return Ok(false);
             }
             *current_model_variant = model_variant;
             app.usage.context_window = Some(resolved_model_spec.context_window());
@@ -512,19 +539,20 @@ mod tests {
         let temp = TempDirGuard::new("lash-provider-persist");
         let _lash_home = EnvVarGuard::set("LASH_HOME", temp.path());
         let path = crate::paths::config_file();
-        let provider = lash_core::testing::TestProvider::builder()
+        let concrete = lash::testing::TestProvider::builder()
             .kind("persist-provider")
             .serialize_config(|| serde_json::json!({ "token": "refreshed" }))
-            .build()
-            .into_handle();
-        let mut cfg = LashConfig::new(&provider);
+            .build();
+        let provider_config = crate::config::ProviderConfig::from_provider(&concrete);
+        let provider = concrete.into_handle();
+        let mut cfg = LashConfig::new(provider_config);
 
         persist_provider_config(&mut cfg, &provider, &path).expect("persist provider config");
 
         let saved = LashConfig::load(&path).expect("saved config");
         assert_eq!(saved.active_provider_kind(), "persist-provider");
         let spec = saved
-            .provider_spec("persist-provider")
+            .provider_config("persist-provider")
             .expect("provider spec");
         assert_eq!(
             spec.config.get("token").and_then(serde_json::Value::as_str),

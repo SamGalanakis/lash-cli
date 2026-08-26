@@ -335,22 +335,22 @@ impl ActivityState {
         &mut self,
         name: &str,
         args: Value,
-        output: lash_core::ToolCallOutput,
+        output: lash::tools::ToolCallOutput,
         duration_ms: u64,
     ) -> Vec<ActivityBlock> {
         let name = activity_tool_name(name);
         let result = match &output.outcome {
-            lash_core::ToolCallOutcome::Failure(failure) => failure
+            lash::tools::ToolCallOutcome::Failure(failure) => failure
                 .raw
                 .as_ref()
-                .map(lash_core::ToolValue::to_json_value)
+                .map(lash::tools::ToolValue::to_json_value)
                 .unwrap_or_else(|| output.value_for_projection()),
-            lash_core::ToolCallOutcome::Cancelled(cancellation) => cancellation
+            lash::tools::ToolCallOutcome::Cancelled(cancellation) => cancellation
                 .raw
                 .as_ref()
-                .map(lash_core::ToolValue::to_json_value)
+                .map(lash::tools::ToolValue::to_json_value)
                 .unwrap_or_else(|| output.value_for_projection()),
-            lash_core::ToolCallOutcome::Success(_) => output.value_for_projection(),
+            lash::tools::ToolCallOutcome::Success(_) => output.value_for_projection(),
         };
         let success = output.is_success();
         if name == "batch" {
@@ -359,10 +359,10 @@ impl ActivityState {
             // nothing and the children render from those real events.
             return Vec::new();
         }
-        let status = match output.status() {
-            lash_core::ToolCallStatus::Success => ActivityStatus::Completed,
-            lash_core::ToolCallStatus::Failure => ActivityStatus::Failed,
-            lash_core::ToolCallStatus::Cancelled => ActivityStatus::Cancelled,
+        let status = match &output.outcome {
+            lash::tools::ToolCallOutcome::Success(_) => ActivityStatus::Completed,
+            lash::tools::ToolCallOutcome::Failure(_) => ActivityStatus::Failed,
+            lash::tools::ToolCallOutcome::Cancelled(_) => ActivityStatus::Cancelled,
         };
         let mut ctx = ProjectCtx {
             name,
@@ -390,7 +390,7 @@ impl ActivityState {
         timeline: &mut UiTimeline,
         name: &str,
         args: Value,
-        output: lash_core::ToolCallOutput,
+        output: lash::tools::ToolCallOutput,
         duration_ms: u64,
     ) -> Vec<ActivityBlock> {
         let activities = self.project_tool_output(name, args, output, duration_ms);
@@ -425,11 +425,12 @@ impl ActivityState {
         duration_ms: u64,
     ) -> Vec<ActivityBlock> {
         let output = if success {
-            lash_core::ToolCallOutput::success(result)
+            lash::tools::ToolCallOutput::success(result)
         } else {
-            lash_core::ToolResult::err(result)
-                .into_done_output()
-                .expect("static failure output")
+            lash::tools::ToolCallOutput::failure(lash::tools::ToolFailure::invalid_request(
+                "test_failure",
+                result.to_string(),
+            ))
         };
         self.project_tool_output(name, args, output, duration_ms)
     }
@@ -514,7 +515,7 @@ pub(crate) mod tests {
         let blocks = state.project_tool_output(
             "read_file",
             json!({ "path": "README.md" }),
-            lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
+            lash::tools::ToolCallOutput::cancelled(lash::tools::ToolCancellation::runtime(
                 "tool call cancelled",
             )),
             1,

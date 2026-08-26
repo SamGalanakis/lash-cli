@@ -6,8 +6,9 @@
 
 **Purpose.** Prove the CLI process dock's contract: a **Runtime Process** shows in the dock
 (header `Background`), the focused process can be cancelled (`Delete`), and — the invariant
-— **ending or deleting a session never ends a process by itself**. Only runtime processes
-appear in the dock; a subagent spawn does not.
+— **ending or deleting a session never ends a process by itself**. The dock uniformly
+reflects the session's durable process registry (`session.processes().list()`). A subagent
+spawn is inline tool activity only and does not appear in the dock.
 
 **Why this matters.** The Lash repository's CONTEXT.md → "Runtime Process" says its
 lifecycle is independent of any session and only runtime processes appear in the CLI
@@ -23,10 +24,10 @@ by dry-run against every deterministic scenario:
   /fork /tree /version /info /model /variant /mode /provider /logout /retry /resume /skills
   /help /exit` (`crates/lash-cli/src/command.rs`). The dock is a render surface fed by
   `session.processes().list()`, not a command.
-- The RLM `rlm-subagent-smoke` scenario **does** spawn a subagent, but it renders as an
-  **inline tool activity** — `◆ spawn subagent · …` with footer `Running tool ·
-  spawn_agent` — and the `Background` dock header never appears. A subagent is not a dock
-  Runtime Process (consistent with the contract: "Only runtime processes appear").
+- The RLM `rlm-subagent-smoke` scenario **does** spawn a subagent. It renders only as
+  inline tool activity — `◆ spawn subagent · …` with footer `Running tool ·
+  spawn_agent`. It never raises a `Background` dock row and is not a durable Runtime
+  Process, so it cannot witness the deletion invariant.
 - The deterministic test provider only returns canned responses, so no scenario leaves a
   durable Runtime Process running; the dock stays empty (`app.processes.is_empty()` →
   `crates/lash-cli/src/render/sections/docks.rs` draws nothing). A **Process Engine** that
@@ -63,7 +64,8 @@ confirm the deterministic provider and idle prompt.
 type Does your subagent tool work
 key enter
 expect 15 Running tool
-expect 45 subagent-ok
+clear
+expect 45 ■ subagent-ok
 screen 40
 ```
 
@@ -100,7 +102,7 @@ tokens — deliberate).
 1. **Start a process.** Drive a turn whose tool starts a durable background process. Gate:
    the `Background` dock renders a row `◆ running · <producer> · <label> · <elapsed>`
    (`crates/lash-cli/src/render/sections/docks.rs`). Objective cross-check:
-   `LASH_HOME/sessions/*.processes.db`
+   `LASH_HOME/store/processes.db`
    records the process; a `list_process_handles` activity, if driven, reports it `running`.
 2. **Focus and inspect.** With an empty prompt, `Tab` to focus the dock row (it gains the
    `SELECTED` badge / `▶` glyph); `Enter` opens its overview. Gate: the focused row and the
@@ -120,7 +122,7 @@ tokens — deliberate).
 
 | Item | Objective gate | Verdict | Notes |
 |------|----------------|---------|-------|
-| Subagent is a tool activity, not a dock process | `◆ spawn subagent` + `Running tool`, no `Background` dock |  |  |
+| Subagent is a tool activity, not a dock process | `◆ spawn subagent` + `Running tool`, then post-`clear` `■ subagent-ok`; no `Background` dock |  |  |
 | Empty dock has no focus target | `Tab` opens no overview; no `Background` header |  |  |
 | Dock process visible *(real only)* | `Background` row `◆ running · … `; process store row |  |  |
 | Cancel path *(real only)* | `running → cancelled`; terminal state in store |  |  |

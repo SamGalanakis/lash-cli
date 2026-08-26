@@ -1,8 +1,9 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use futures_util::StreamExt as _;
+use lash::observe::LiveReplayGap;
 use lash::observe::{SessionCursor, SessionObservationEventPayload, SessionObservationStreamItem};
+use lash::runtime::{SessionPolicy, SessionSnapshot};
 use lash::{LashSession, TurnActivity, TurnActivityId, TurnEvent, TurnInput};
-use lash_core::{LiveReplayGap, SessionPolicy, SessionSnapshot};
 use lash_tui_extensions::{
     KeyChord as UiKeyChord, KeyCode as UiKeyCode, KeyModifiers as UiKeyModifiers,
 };
@@ -50,7 +51,7 @@ impl SessionObservationBridge {
                     }
                     next = subscription.next() => {
                         match next {
-                            Some(Ok(SessionObservationStreamItem::Event(event))) => match event.payload {
+                            Some(Ok(SessionObservationStreamItem::Event(event))) => match event.payload.clone() {
                                 SessionObservationEventPayload::TurnActivity(activity) => {
                                     coalescer.emit(activity).await;
                                 }
@@ -79,6 +80,10 @@ impl SessionObservationBridge {
                                     coalescer.flush().await;
                                     let _ = app_tx.send(AppEvent::SessionObservationFinished { stream_id });
                                     break;
+                                }
+                                SessionObservationEventPayload::ResidentChanged { .. } => {
+                                    coalescer.flush().await;
+                                    let _ = app_tx.send(AppEvent::RequestUiSnapshot);
                                 }
                             },
                             Some(Ok(SessionObservationStreamItem::Gap { gap, .. })) => {
@@ -167,12 +172,12 @@ impl TurnActivityCoalescer {
         let correlation_id = self
             .pending_correlation_id
             .take()
-            .unwrap_or_else(TurnActivityId::fresh);
+            .unwrap_or_else(|| TurnActivityId::new(uuid::Uuid::new_v4().to_string()));
         let _ = self.app_tx.send(AppEvent::Session {
             stream_id: self.stream_id,
             activity: Box::new(TurnActivity::new(
                 correlation_id,
-                TurnEvent::AssistantProseDelta { text },
+                TurnEvent::AssistantProseDelta { text: text.into() },
             )),
         });
         if self.coalesced > 0 {
@@ -289,10 +294,7 @@ impl UiSnapshotWorker {
 }
 
 pub(super) fn cleared_session_state(policy: SessionPolicy) -> SessionSnapshot {
-    SessionSnapshot {
-        policy,
-        ..SessionSnapshot::default()
-    }
+    SessionSnapshot::new(policy)
 }
 
 pub(super) fn log_runtime_transition(

@@ -15,6 +15,8 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = ExecutionModeArg::Standard)]
     execution_mode: ExecutionModeArg,
     #[arg(long)]
+    rlm_dialect: Option<String>,
+    #[arg(long)]
     repo_root: Option<PathBuf>,
     #[arg(long)]
     lash_bin: Option<PathBuf>,
@@ -65,6 +67,7 @@ fn main() -> Result<()> {
 
     let mut config = HarnessConfig::new(repo_root);
     config.execution_mode = cli.execution_mode.into();
+    config.rlm_dialect = cli.rlm_dialect;
     config.lash_bin = cli.lash_bin;
     config.lash_home = cli.lash_home;
     config.working_dir = cli.working_dir;

@@ -2,30 +2,115 @@ use super::*;
 
 impl App {
     pub fn clear(&mut self) {
-        self.timeline = Vec::new().into();
-        self.scroll_offset = 0;
-        self.follow_mode = FollowOutputMode::PinnedBottom;
-        self.live.assistant.clear();
-        self.live.reasoning.clear();
         self.clear_status();
-        self.editor.pending_images.clear();
-        self.editor.pending_large_pastes.clear();
-        self.clear_live_tool_output();
-        self.queues.draft_presentations.clear();
-        self.clear_pending_turn_input_snapshot();
-        self.overlay = None;
-        self.activity_state.reset();
-        self.usage.token_usage = TokenUsage::default();
-        self.usage.last_response_usage = TokenUsage::default();
-        self.usage.last_prompt_usage = None;
-        self.usage.live_output_chars_estimate = 0;
-        self.usage.live_output_tokens_estimate = 0;
-        self.model_variant = None;
-        self.clear_mode_indicators();
-        self.plan_dock = None;
-        self.processes.clear();
-        self.selected_process_id = None;
-        self.invalidate_height_cache();
+
+        // Session-switch reset. EVERY App field must be classified below, exactly
+        // once: either reset (session-scoped) or bound as carried (process-scoped).
+        // Adding a field to App fails compilation here until you decide its fate.
+        // The editor carries typed input and history; pending images and large pastes
+        // are the process-scoped exception reset below.
+        let App {
+            // ---- carried across session switches (process/config-scoped) ----
+            expand_level: _,
+            tick: _,
+            dirty,
+            render_cache,
+            editor,
+            skills: _,
+            focused: _,
+            model: _,
+            repo_status: _,
+            ui_extensions: _,
+            chrome_state: _,
+            cwd: _,
+            history_area: _,
+            file_index: _,
+            // ---- reset (session-scoped) ----
+            timeline,
+            scroll_offset,
+            foreground_turn_active,
+            run_state,
+            iteration,
+            live,
+            follow_mode,
+            history_top_pad,
+            queues,
+            overlay,
+            usage,
+            model_variant,
+            execution_mode_label,
+            rlm_dialect_label,
+            automatic_tool_catalog_sync,
+            session_name,
+            session_id,
+            plugin_mode_indicators,
+            plan_dock,
+            processes,
+            selected_process_id,
+            activity_state,
+            ui_activity_journal,
+            pending_ui_activity_records,
+            active_ui_turn_ordinal,
+            next_lashlang_block_ordinal,
+            lashlang_block_anchors,
+            manual_interrupt_requested,
+            active_turn_id,
+            pending_retry_status,
+            selection,
+            toast,
+            suppress_mouse_up_after_selection_clear,
+        } = self;
+
+        let mark_dirty =
+            !queues.pending_turn_input_snapshot.is_empty() || !plugin_mode_indicators.is_empty();
+
+        *timeline = UiTimeline::default();
+        *scroll_offset = 0;
+        *foreground_turn_active = false;
+        *run_state = CliRunState::Idle;
+        *iteration = 0;
+        *live = LiveTurnView::default();
+        *follow_mode = FollowOutputMode::PinnedBottom;
+        *history_top_pad = 0;
+        editor.pending_images.clear();
+        editor.pending_large_pastes.clear();
+        *queues = Queues::default();
+        *overlay = None;
+        // context_window is model-scoped (set only at startup, /model, and
+        // resume); wiping it here would let the next session-switch policy
+        // fall back to a 1-token window.
+        *usage = UsageState {
+            context_window: usage.context_window,
+            ..UsageState::default()
+        };
+        *model_variant = None;
+        *execution_mode_label = "standard".to_string();
+        *rlm_dialect_label = None;
+        *automatic_tool_catalog_sync = Default::default();
+        session_name.clear();
+        session_id.clear();
+        plugin_mode_indicators.clear();
+        *plan_dock = None;
+        processes.clear();
+        *selected_process_id = None;
+        activity_state.reset();
+        *ui_activity_journal = UiActivityJournal::default();
+        pending_ui_activity_records.clear();
+        *active_ui_turn_ordinal = None;
+        *next_lashlang_block_ordinal = 0;
+        lashlang_block_anchors.clear();
+        *manual_interrupt_requested = false;
+        *active_turn_id = None;
+        *pending_retry_status = None;
+        *selection = TextSelection::default();
+        *toast = None;
+        *suppress_mouse_up_after_selection_clear = false;
+
+        if mark_dirty {
+            *dirty = true;
+        }
+        render_cache.dirty_from = 0;
+        render_cache.blocks.clear();
     }
 
     pub fn restore_prepared_turn(&mut self, turn: PreparedTurn) {
@@ -36,15 +121,6 @@ impl App {
 
     pub fn next_image_marker_id(&self) -> usize {
         self.editor.next_image_marker_id()
-    }
-
-    #[cfg(test)]
-    pub fn add_pending_image(&mut self, png_bytes: Vec<u8>) -> usize {
-        let id = self.next_image_marker_id();
-        self.editor
-            .pending_images
-            .push(PendingImage { id, png_bytes });
-        id
     }
 
     pub fn begin_pending_image(&mut self, id: usize) {
@@ -92,8 +168,49 @@ impl App {
             return;
         }
 
+        // Manual scroll: the toggle still applies, but every offset below
+        // the viewport moves when blocks change height, so re-anchor to the
+        // block the reader was looking at instead of keeping a raw line
+        // offset that now points somewhere else.
+        let width = self.render_cache.width;
+        let viewport_height = self.render_cache.viewport_height;
+        if width == 0 || viewport_height == 0 {
+            self.expand_level = level;
+            self.invalidate_height_cache();
+            return;
+        }
+
+        self.ensure_height_cache(width, viewport_height);
+        let anchor = self.viewport_top_anchor();
+
         self.expand_level = level;
         self.invalidate_height_cache();
+        self.ensure_height_cache(width, viewport_height);
+
+        let max_scroll = self
+            .total_content_height(width, viewport_height)
+            .saturating_sub(viewport_height);
+        let anchored = match anchor {
+            Some((idx, offset_into_block)) if idx < self.render_cache.heights.len() => {
+                let start = self.block_start_offset(idx);
+                let height = self.render_cache.heights[idx].saturating_sub(start);
+                start + offset_into_block.min(height)
+            }
+            _ => self.scroll_offset,
+        };
+        self.scroll_offset = anchored.min(max_scroll);
+    }
+
+    /// Index of the block occupying the top viewport row plus how far into
+    /// that block the row sits. `None` when the cache is empty or the
+    /// viewport starts past the end of history.
+    fn viewport_top_anchor(&self) -> Option<(usize, usize)> {
+        let heights = &self.render_cache.heights;
+        let idx = heights.partition_point(|end| *end <= self.scroll_offset);
+        if idx >= heights.len() {
+            return None;
+        }
+        Some((idx, self.scroll_offset - self.block_start_offset(idx)))
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
@@ -405,5 +522,109 @@ impl App {
             + self.live_reasoning_height()
             + self.live_assistant_height()
             + crate::render::plan_dock_trailing_height(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const WIDTH: usize = 40;
+    const VIEWPORT: usize = 6;
+
+    fn app_with_code_block() -> App {
+        let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
+        let mut timeline = vec![
+            UiTimelineItem::UserInput("first question".into()),
+            UiTimelineItem::LashlangCode("one\ntwo\nthree\nfour\nfive\nsix".into()),
+        ];
+        // Enough trailing history that the anchored offset stays well
+        // below `max_scroll` — otherwise clamping, not anchoring, would
+        // decide the assertion.
+        timeline.extend(
+            (0..12).map(|idx| UiTimelineItem::UserInput(format!("follow-up question {idx}"))),
+        );
+        app.timeline = timeline.into();
+        app.expand_level = 0;
+        app.ensure_height_cache_pub(WIDTH, VIEWPORT);
+        app
+    }
+
+    #[test]
+    fn expand_level_applies_while_scrolled_up() {
+        let mut app = app_with_code_block();
+        // Park the viewport on the block right after the code block, in
+        // manual scroll mode — the state Alt+O used to silently ignore.
+        let block_two_start = app.height_cache_snapshot()[1];
+        app.scroll_offset = block_two_start;
+        app.follow_mode = FollowOutputMode::Manual;
+
+        app.set_expand_level(2);
+
+        assert_eq!(
+            app.expand_level, 2,
+            "expand level must apply while scrolled"
+        );
+        assert_eq!(
+            app.follow_mode,
+            FollowOutputMode::Manual,
+            "expanding must not silently resume follow mode",
+        );
+        let expanded_block_two_start = app.height_cache_snapshot()[1];
+        assert!(
+            expanded_block_two_start > block_two_start,
+            "code block should have grown at full expansion",
+        );
+        assert_eq!(
+            app.scroll_offset, expanded_block_two_start,
+            "viewport should stay anchored to the same block after re-layout",
+        );
+    }
+
+    #[test]
+    fn collapsing_while_scrolled_clamps_to_max_scroll() {
+        let mut app = app_with_code_block();
+        app.expand_level = 2;
+        app.invalidate_height_cache();
+        app.ensure_height_cache_pub(WIDTH, VIEWPORT);
+        app.scroll_offset = app.total_content_height(WIDTH, VIEWPORT);
+        app.follow_mode = FollowOutputMode::Manual;
+
+        app.set_expand_level(0);
+
+        let max_scroll = app
+            .total_content_height(WIDTH, VIEWPORT)
+            .saturating_sub(VIEWPORT);
+        assert_eq!(app.expand_level, 0);
+        assert_eq!(app.follow_mode, FollowOutputMode::Manual);
+        assert!(
+            app.scroll_offset <= max_scroll,
+            "scroll offset {} exceeds max scroll {max_scroll} after collapsing",
+            app.scroll_offset,
+        );
+    }
+
+    #[test]
+    fn clear_drops_previous_session_activity_journal() {
+        let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
+        let activity = ActivityBlock::new(
+            ActivityKind::ShellCommand,
+            "bash",
+            serde_json::json!({ "command": "nproc" }),
+            "nproc",
+            ActivityStatus::Completed,
+            serde_json::json!({ "output": "16\n" }),
+            5,
+        );
+        app.journal_lashlang_activity(Some((0, 0)), &activity);
+        app.usage.context_window = Some(1_310_720);
+        assert!(!app.ui_activity_journal.is_empty());
+        assert!(!app.pending_ui_activity_records().is_empty());
+
+        app.clear();
+
+        assert!(app.ui_activity_journal.is_empty());
+        assert!(app.pending_ui_activity_records().is_empty());
+        assert_eq!(app.usage.context_window, Some(1_310_720));
     }
 }

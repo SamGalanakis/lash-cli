@@ -11,14 +11,16 @@ mod mouse;
 mod shortcuts;
 mod turns;
 
+pub(crate) use shortcuts::restore_cancelled_input_texts;
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crossterm::event::{Event as TermEvent, KeyEvent, KeyEventKind};
 use lash::CancellationToken;
+use lash::messages::Message;
+use lash::tools::ToolState;
 use lash::{LashSession, provider::ProviderHandle};
-use lash_core::ToolState;
-use lash_core::session_model::Message;
 use lash_tui::{InputEvent as TuiInputEvent, Terminal, normalize_event};
 use lash_tui_extensions::{TuiExtensionContext, TuiExtensions, TuiInputOutcome};
 
@@ -36,12 +38,6 @@ use super::commands::SlashCommandCtx;
 use super::helpers::{TurnReplayPayload, key_chord_from_event};
 
 pub(super) use mouse::handle_mouse_event;
-#[cfg(test)]
-pub(crate) use shortcuts::command_palette_items;
-#[cfg(test)]
-pub(super) use turns::selected_slash_command_suggestion;
-#[cfg(test)]
-pub(super) use turns::slash_command_blocked_while_working_message;
 
 /// Bundle of the long-lived interactive-loop state every key handler
 /// needs. The run loop borrows its locals into this once per key event

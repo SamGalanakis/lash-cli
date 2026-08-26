@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
-use lash_core::{Message, MessageRole, PartKind, SessionMessageTreeNode};
+use crate::tree::SessionMessageTreeNode;
+use lash::messages::{Message, MessageRole, PartKind};
 
 use crate::command;
 use crate::config::ThemeName;
@@ -294,6 +295,7 @@ impl PromptState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandPaletteAction {
     Builtin(command::Command),
+    NewSession(crate::execution_settings::RlmDialect),
     InsertDraft(String),
     Theme(ThemeName),
 }
@@ -489,10 +491,14 @@ pub struct SessionPickerState {
     pub selected: usize,
     pub query: String,
     pub showing_empty_sessions: bool,
+    pub incompatible_session_count: usize,
 }
 
 impl SessionPickerState {
-    pub fn new(items: Vec<SessionInfo>) -> Self {
+    pub fn with_incompatible_sessions(
+        items: Vec<SessionInfo>,
+        incompatible_session_count: usize,
+    ) -> Self {
         let has_non_empty = items.iter().any(|session| session.message_count > 0);
         let items = if has_non_empty {
             items
@@ -509,6 +515,7 @@ impl SessionPickerState {
             selected: 0,
             query: String::new(),
             showing_empty_sessions,
+            incompatible_session_count,
         }
     }
 
@@ -766,7 +773,7 @@ fn is_user_visible_message(message: &Message) -> bool {
             message.parts.iter().any(|part| {
                 matches!(
                     part.kind,
-                    PartKind::Text | PartKind::Prose | PartKind::Image
+                    PartKind::Text | PartKind::Prose | PartKind::Attachment
                 )
             })
         }
@@ -837,11 +844,11 @@ pub fn tree_message_preview(message: &Message) -> String {
                     preview.push_str(part.content.trim());
                 }
             }
-            PartKind::Image => {
+            PartKind::Attachment => {
                 if !preview.is_empty() {
                     preview.push(' ');
                 }
-                preview.push_str("[image]");
+                preview.push_str("[attachment]");
             }
             PartKind::ToolCall => {
                 if !preview.is_empty() {

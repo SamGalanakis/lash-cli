@@ -1,11 +1,6 @@
 use super::*;
 use crate::assistant_text::{push_assistant_reasoning_block, push_assistant_text_block};
 
-#[cfg(test)]
-const STREAMING_OUTPUT_MAX_LINES: usize = 48;
-#[cfg(test)]
-const STREAMING_OUTPUT_LINE_CHAR_LIMIT: usize = 240;
-
 pub struct LiveTurnState {
     pub run_state: CliRunState,
     pub status_detail: Option<String>,
@@ -65,52 +60,6 @@ impl LiveToolOutput {
     pub(crate) fn height(&self) -> usize {
         usize::from(self.hidden > 0) + self.lines.len() + usize::from(!self.partial.is_empty())
     }
-
-    #[cfg(test)]
-    pub(super) fn push_text(&mut self, text: &str, line_char_limit: usize, max_lines: usize) {
-        let sanitized = strip_ansi_escape_sequences(text);
-        let mut chars = sanitized.chars().peekable();
-        while let Some(ch) = chars.next() {
-            match ch {
-                '\r' if matches!(chars.peek(), Some('\n')) => {
-                    chars.next();
-                    let completed = std::mem::take(&mut self.partial);
-                    self.push_line(completed, line_char_limit, max_lines);
-                }
-                '\r' => {
-                    self.partial.clear();
-                }
-                '\n' => {
-                    let completed = std::mem::take(&mut self.partial);
-                    self.push_line(completed, line_char_limit, max_lines);
-                }
-                '\t' => {
-                    if !self.partial.chars().last().is_some_and(char::is_whitespace) {
-                        self.partial.push(' ');
-                    }
-                }
-                '\u{8}' | '\u{7f}' => {
-                    self.partial.pop();
-                }
-                control if control.is_control() => {}
-                _ => self.partial.push(ch),
-            }
-
-            if self.partial.chars().count() > line_char_limit {
-                self.partial = smart_truncate_preview_line(&self.partial, line_char_limit);
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn push_line(&mut self, line: String, line_char_limit: usize, max_lines: usize) {
-        if self.lines.len() == max_lines {
-            self.lines.remove(0);
-            self.hidden += 1;
-        }
-        self.lines
-            .push(smart_truncate_preview_line(&line, line_char_limit));
-    }
 }
 
 pub(super) fn live_tool_output_title(name: &str, args: &serde_json::Value) -> String {
@@ -147,6 +96,7 @@ impl App {
 
     pub fn start_turn(&mut self) {
         self.foreground_turn_active = true;
+        self.active_turn_id = None;
         self.run_state = CliRunState::Working;
         self.manual_interrupt_requested = false;
         self.pending_retry_status = None;
@@ -156,6 +106,8 @@ impl App {
         self.iteration = 0;
         self.live.assistant.clear();
         self.live.reasoning.clear();
+        self.live.model_output_chunks.clear();
+        self.live.model_output_timeline_start = self.timeline.len();
         self.clear_live_tool_output();
         self.usage.live_output_chars_estimate = 0;
         self.usage.live_output_tokens_estimate = 0;
@@ -178,6 +130,14 @@ impl App {
 
     pub(crate) fn turn_active(&self) -> bool {
         self.foreground_turn_active
+    }
+
+    pub(crate) fn set_active_turn_id(&mut self, turn_id: impl Into<String>) {
+        self.active_turn_id = Some(turn_id.into());
+    }
+
+    pub(crate) fn active_turn_id(&self) -> Option<&str> {
+        self.active_turn_id.as_deref()
     }
 
     pub(crate) fn can_inject_into_active_turn(&self) -> bool {
@@ -203,7 +163,7 @@ impl App {
     pub fn stop_turn(&mut self) {
         self.invalidate_live_reasoning_tail();
         self.foreground_turn_active = false;
-        self.manual_interrupt_requested = false;
+        self.active_turn_id = None;
         self.pending_retry_status = None;
         self.active_ui_turn_ordinal = None;
         self.next_lashlang_block_ordinal = 0;
@@ -266,6 +226,7 @@ impl App {
 
     pub(super) fn clear_status(&mut self) {
         self.foreground_turn_active = false;
+        self.active_turn_id = None;
         self.manual_interrupt_requested = false;
         self.pending_retry_status = None;
         self.live.turn = None;
@@ -277,6 +238,9 @@ impl App {
             return;
         }
         self.foreground_turn_active = active;
+        if !active {
+            self.active_turn_id = None;
+        }
         if !active && self.run_state.is_runtime_active() {
             let keep_transient_error = self.live.turn.as_ref().is_some_and(|turn| {
                 turn.run_state == CliRunState::Error
@@ -294,6 +258,10 @@ impl App {
 
     pub fn note_manual_interrupt_requested(&mut self) {
         self.manual_interrupt_requested = true;
+    }
+
+    pub fn clear_manual_interrupt_requested(&mut self) {
+        self.manual_interrupt_requested = false;
     }
 
     pub(super) fn mark_first_token_arrived(&mut self) {
@@ -486,14 +454,5 @@ impl App {
     pub(super) fn finalize_live_markdown(&mut self) {
         self.commit_live_reasoning_block();
         self.commit_live_assistant_block();
-    }
-
-    #[cfg(test)]
-    pub(super) fn push_test_tool_output(&mut self, text: &str) {
-        self.live.tool_output.push_text(
-            text,
-            STREAMING_OUTPUT_LINE_CHAR_LIMIT,
-            STREAMING_OUTPUT_MAX_LINES,
-        );
     }
 }

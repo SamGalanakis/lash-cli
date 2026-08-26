@@ -1572,7 +1572,7 @@
       </div>
       <div>
         <h2>same shape · everywhere</h2>
-        <p>Every view is just a session render. The exporter already does that for one .db; we just iterate per descendant session, link them with the breadcrumb, and bake them all into one self-contained html file.</p>
+        <p>Every view is just a session render. The exporter reads each descendant from the unified session catalog, links them with the breadcrumb, and bakes them all into one self-contained html file.</p>
       </div>
     </div>
   </section>
@@ -1585,8 +1585,8 @@
     const backBtn = document.getElementById('back-btn');
 
     // Tree shape — the whole call graph for breadcrumb resolution.
-    // In the real exporter this comes from walking sessions/*.db and
-    // matching parent_session_id chains.
+    // In the real exporter this comes from the durable-core catalog's
+    // session read views and their parent-session relationships.
     const tree = {
       root: { label: 'root', sid: 's1·a47e', kind: 'root', parent: null },
       auth_files: { label: 'auth_files', sid: 's2·b9c1', kind: 'subagent', parent: 'root' },

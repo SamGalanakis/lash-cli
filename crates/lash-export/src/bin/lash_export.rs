@@ -14,8 +14,16 @@ use lash_export::{ExportFormat, export};
     about = "Render a persisted lash session as HTML or JSON"
 )]
 struct Cli {
-    /// Direct path to the session .db file.
-    db: PathBuf,
+    /// Root directory of the Lash SQLite session store.
+    store_root: PathBuf,
+
+    /// Session to render as the root of the export.
+    #[arg(long)]
+    session_id: String,
+
+    /// Host-roster session id to consider for tree HTML. May be repeated.
+    #[arg(long = "tree-session-id")]
+    tree_session_ids: Vec<String>,
 
     /// Full provider trace JSONL for the session.
     #[arg(long)]
@@ -48,7 +56,14 @@ fn run() -> Result<()> {
         .enable_all()
         .build()
         .with_context(|| "starting async runtime")?
-        .block_on(export(&cli.db, &cli.trace, format, cli.out.as_deref()))
+        .block_on(export(
+            &cli.store_root,
+            &cli.session_id,
+            &cli.tree_session_ids,
+            &cli.trace,
+            format,
+            cli.out.as_deref(),
+        ))
         .with_context(|| "rendering session")?;
 
     if cli.out.is_none() {

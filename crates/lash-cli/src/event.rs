@@ -1,5 +1,7 @@
 use crossterm::event::Event as TermEvent;
-use lash_core::{ProcessHandleSummary, SessionProcessEventKind, TurnActivity};
+use lash::TurnActivity;
+use lash::observe::SessionProcessEventKind;
+use lash::process::ProcessHandleView;
 use lash_tui_extensions::TuiHostEffect;
 use tokio::sync::mpsc;
 
@@ -18,6 +20,10 @@ pub enum AppEvent {
     Session {
         stream_id: u64,
         activity: Box<TurnActivity>,
+    },
+    ActiveTurnObserved {
+        stream_id: u64,
+        turn_id: String,
     },
     Prompt {
         request: PromptRequest,
@@ -54,7 +60,7 @@ pub enum AppEvent {
 
 pub struct UiSnapshotResult {
     pub effects: Vec<TuiHostEffect>,
-    pub processes: Option<Vec<ProcessHandleSummary>>,
+    pub processes: Option<Vec<ProcessHandleView>>,
     pub duration: std::time::Duration,
     pub timed_out: bool,
     pub diagnostics: Vec<String>,
@@ -171,9 +177,10 @@ impl AppEventTx {
 
 fn lane_for_event(event: &AppEvent) -> EventLane {
     match event {
-        AppEvent::Terminal(_) | AppEvent::ClipboardImageReady { .. } | AppEvent::Quit => {
-            EventLane::High
-        }
+        AppEvent::Terminal(_)
+        | AppEvent::ClipboardImageReady { .. }
+        | AppEvent::ActiveTurnObserved { .. }
+        | AppEvent::Quit => EventLane::High,
         AppEvent::Session { .. }
         | AppEvent::ProcessChanged { .. }
         | AppEvent::Prompt { .. }

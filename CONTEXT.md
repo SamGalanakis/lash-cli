@@ -10,9 +10,11 @@
 - `Ctrl+C` is reserved for cancel/dismiss/quit semantics: close suggestions or overlays, cancel an active turn, clear a non-empty draft, then quit only from an idle empty prompt.
 - Copy uses `Ctrl+Shift+C` by default. `Ctrl+U` deletes draft text to the start of the line, `Ctrl+K` deletes to the end, and history/document scrolling uses PgUp/PgDn, mouse wheel, and scroll gestures.
 - `Ctrl+P` opens the command and settings palette — a searchable overlay of settings actions (theme, model, variant, and other commands) applied directly without typing a slash command.
-- The status bar shows model and reasoning variant joined, then execution mode, then plugin modes, for example `gpt-5.5 medium · standard`; it carries no `lash` brand prefix. Context usage is labeled as `ctx`.
+- The status bar shows model and reasoning variant joined, then execution mode and the pinned RLM dialect when applicable, for example `gpt-5.5 medium · rlm · typescript`; it carries no `lash` brand prefix. Context usage is labeled as `ctx`.
 - Queue previews sit directly above the input. Early-injected work is labeled `Will send in this turn`; next-turn work is labeled `Queued for next turn`.
-- The `/resume` picker hides zero-turn sessions when any non-empty session exists. If only empty sessions exist it shows them with `No messages yet`; direct `/resume <id-or-name>` may still target any session.
+- Escape during an active turn durably cancels the physical turn ID learned from the queued/direct turn builder's turn-scoped activity sink with dropped-input disposition, then restores affected steer text from the completed `TurnReport` ahead of the current editor draft without replaying it automatically. A crash during the narrow editor-restore window may lose text the operator explicitly chose to Drop; no recovery sidecar is kept.
+- The `/resume` picker discovers live root sessions from Lash's unified catalog and uses the host roster only for display metadata. It hides zero-turn sessions when any non-empty session exists. If only empty sessions exist it shows them with `No messages yet`; catalog-only sessions receive fallback labels, and direct `/resume <id-or-name>` may still target any session. Alpha-era per-session databases add the notice `N sessions from an older Lash are not openable` and are never opened.
+- The current durable compatibility markers are session schema 41, trace schema 9, and remote protocol 46. `lash --version` and `/info` report these markers.
 
 ## Autonomous CLI Testing
 

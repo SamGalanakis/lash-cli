@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use lash_core::ChronologicalPayload;
-use lash_core::session_model::{Message, MessageRole, Part, PartKind, PruneState};
+use lash::messages::{Message, MessageRole, Part, PartKind};
+use lash::persistence::ChronologicalPayload;
+use lash_core::session_model::PruneState;
 
 use super::escaping::{escape, escape_attr, json_highlight};
 use super::prompt::{
@@ -355,7 +356,7 @@ fn headline_for_message(message: &Message, user_text: Option<&str>) -> String {
             PartKind::Code => "code",
             PartKind::Output => "output",
             PartKind::Error => "error",
-            PartKind::Image => "image",
+            PartKind::Attachment => "attachment",
             PartKind::ToolCall => "tool_call",
             PartKind::ToolResult => "tool_result",
             PartKind::Reasoning => "reasoning",

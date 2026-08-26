@@ -112,17 +112,19 @@ expect 10 slow initial prompt
 type hold for next turn
 key tab
 expect 8 ◇ Queued for next turn
-expect 20 test-provider echo: slow initial prompt
-expect 20 hold for next turn
+expect 20 ■ test-provider echo: slow initial prompt
+clear
+expect 20 ● hold for next turn
+expect 20 ■ test-provider echo: hold for next turn
 ```
 
 Gate: after the first turn settles (`■ test-provider echo: slow initial prompt`), the
-queued draft becomes its own committed user turn — a `● hold for next turn` row below the
-turn separator, followed by a fresh turn that runs to `Idle`. (Under rolling history the
-second turn's request still contains `slow initial prompt`, so the deterministic echo is
-again `test-provider echo: slow initial prompt`; the delivery gate is the new `● hold for
-next turn` turn, not the echo wording.) The queued draft never firing → Abort/RCA
-(queued-turn dispatch). Then `lash-exit 10`.
+capture is cleared so the already-rendered `↳ hold for next turn` queue-preview child row
+cannot pass the delivery gate. The queued draft must then become its own committed user turn
+— exact row `● hold for next turn` below the turn separator — and settle as exact response
+`■ test-provider echo: hold for next turn`. The `↳` preview proves only that the draft was
+queued; it is not delivery evidence. Either committed marker failing to render → Abort/RCA
+(queued-turn dispatch or settlement). Then `lash-exit 10`.
 
 ## Phase 4 — Slow-turn generation-fence regression (`standard-slow-echo`)
 
@@ -176,7 +178,7 @@ does not pass this phase.
 | Early Injection label | `◆ Will send in this turn` + `↳ inject this now` |  |  |
 | Next Full Turn label | `◇ Queued for next turn` + `↳ hold for next turn` |  |  |
 | Ingress recorded correctly | trace: 1× `queue_current_turn_input`, 1× `queue_turn` |  |  |
-| Next-turn draft delivers | new `● hold for next turn` committed turn after commit |  |  |
+| Next-turn draft delivers | after `clear`, exact `● hold for next turn`, then `■ test-provider echo: hold for next turn`; `↳` preview is insufficient |  |  |
 | Slow-turn rows commit | `● slow initial prompt`, `● generation fence follow-up`, and `■ test-provider echo: slow initial prompt` rendered; footer returned idle |  |  |
 | Slow-turn ingress delivers once | trace: 1× `queue_current_turn_input`, 0× `queue_turn`; provider log: 1× `generation fence follow-up` |  |  |
 | Slow-turn claim stays live | final screen contains no `Superseded` or turn-failure text |  |  |

@@ -8,7 +8,7 @@ use crate::assistant_text::normalize_assistant_text;
 use crate::prompt_model::PromptRequest;
 use crate::theme;
 use async_trait::async_trait;
-use lash_core::{Part, PartKind};
+use lash::messages::Part;
 use lash_tui_extensions::{
     SlashCommandSpec, TuiExtension, TuiExtensionContext, TuiExtensions, TuiHostEffect,
 };
@@ -18,18 +18,18 @@ use std::sync::Arc;
 use std::sync::mpsc;
 
 fn timeline_items_from_test_read_view(
-    events: &[lash_core::SessionHistoryRecord],
-    messages: &[lash_core::Message],
-    _tool_calls: &[lash_core::ToolCallRecord],
+    events: &[lash::persistence::SessionHistoryRecord],
+    messages: &[lash::messages::Message],
+    _tool_calls: &[lash::tools::ToolCallRecord],
     ui_state: &crate::app::UiProjectionState,
 ) -> Vec<crate::app::UiTimelineItem> {
-    let mut graph = lash_core::SessionGraph::default();
+    let mut graph = lash::persistence::SessionGraph::default();
     for event in events {
         match event {
-            lash_core::SessionHistoryRecord::Conversation(record) => {
+            lash::persistence::SessionHistoryRecord::Conversation(record) => {
                 graph.append_message(record.to_message());
             }
-            lash_core::SessionHistoryRecord::Protocol(event) => {
+            lash::persistence::SessionHistoryRecord::Protocol(event) => {
                 graph.append_protocol_event(event.clone());
             }
         }
@@ -37,7 +37,9 @@ fn timeline_items_from_test_read_view(
     let event_message_ids = events
         .iter()
         .filter_map(|event| match event {
-            lash_core::SessionHistoryRecord::Conversation(record) => Some(record.id.as_str()),
+            lash::persistence::SessionHistoryRecord::Conversation(record) => {
+                Some(record.id.as_str())
+            }
             _ => None,
         })
         .collect::<std::collections::HashSet<_>>();
@@ -47,11 +49,11 @@ fn timeline_items_from_test_read_view(
         .cloned()
         .collect::<Vec<_>>();
     graph.append_active_read_delta(&missing_messages);
-    let state = lash_core::SessionSnapshot {
-        session_graph: graph,
-        ..lash_core::SessionSnapshot::default()
-    };
-    let read_view = lash_core::SessionReadView::from_snapshot(&state);
+    let mut state = lash::runtime::SessionSnapshot::new(lash::runtime::SessionPolicy::new(
+        crate::host_policy::turn_budget(),
+    ));
+    state.session_graph = graph;
+    let read_view = lash::persistence::SessionReadView::from_snapshot(&state);
     timeline_from_read_view(&read_view, ui_state)
         .items()
         .to_vec()
@@ -353,21 +355,14 @@ fn prompt_panel_strips_redundant_h1_matching_panel_title() {
 
 #[test]
 fn interrupted_projection_hides_appended_skill_blocks_in_user_text() {
-    let message = lash_core::Message {
+    let message = lash::messages::Message {
         id: "m1".into(),
-        role: lash_core::MessageRole::User,
-        parts: vec![Part {
-            id: "m1.p1".into(),
-            kind: PartKind::Text,
-            content: "Use /wholehog\n\n<skill>\n<name>wholehog</name>\nbody\n</skill>".into(),
-            attachment: None,
-            tool_call_id: None,
-            tool_name: None,
-            tool_replay: None,
-            prune_state: lash_core::PruneState::Intact,
-            reasoning_meta: None,
-            response_meta: None,
-        }]
+        role: lash::messages::MessageRole::User,
+        parts: vec![Part::text(
+            "m1.p1".into(),
+            "Use /wholehog\n\n<skill>\n<name>wholehog</name>\nbody\n</skill>".into(),
+            None,
+        )]
         .into(),
         origin: None,
     };
@@ -672,7 +667,7 @@ fn input_box_shows_ui_command_argument_hint_inline() {
 fn queue_preview_highlights_slash_command_slash() {
     let mut app = App::new("gpt-5.4".into(), "test".into(), "test-session-id".into());
     let turn = PreparedTurn::prepare("/retry later".into(), Vec::new(), &app.skills);
-    app.test_seed_queued_turn_snapshot(turn, lash_core::TurnInputIngress::NextTurn);
+    app.test_seed_queued_turn_snapshot(turn, lash::persistence::TurnInputIngress::NextTurn);
 
     let rendered = queue_preview_lines_snapshot(&app, 40);
     let item_line = rendered
@@ -747,7 +742,7 @@ fn queue_preview_highlights_multiple_detected_slash_commands() {
         Vec::new(),
         &app.skills,
     );
-    app.test_seed_queued_turn_snapshot(turn, lash_core::TurnInputIngress::NextTurn);
+    app.test_seed_queued_turn_snapshot(turn, lash::persistence::TurnInputIngress::NextTurn);
 
     let rendered = queue_preview_lines_snapshot(&app, 80);
     let slash_spans = rendered
@@ -1110,17 +1105,42 @@ fn snippet_preview_wraps_long_markdown_bullets_to_viewport_width() {
 }
 
 #[test]
-fn lashlang_code_block_is_hidden_below_full_expand() {
+fn lashlang_code_block_collapses_to_a_stub_row_below_full_expand() {
     let blocks = vec![UiTimelineItem::LashlangCode(
         "r = await tools.read_file({ path: \"a\" })\nfinish r.value".to_string(),
     )];
     for level in [0u8, 1] {
         let rendered = render_block(&blocks, 0, level, 80, 24);
+        let text: Vec<String> = rendered.into_iter().map(line_to_plain_text).collect();
+        assert_eq!(
+            text,
+            vec!["◇ code · 2 lines — Alt+O to expand".to_string()],
+            "expected a single stub row at expand_level {level}",
+        );
         assert!(
-            rendered.is_empty(),
-            "expected no output at expand_level {level}, got {rendered:?}",
+            !text.iter().any(|line| line.contains("finish r.value")),
+            "code body must stay hidden at expand_level {level}; got {text:?}",
         );
     }
+}
+
+#[test]
+fn lashlang_code_stub_row_names_the_session_dialect() {
+    let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
+    app.timeline = vec![UiTimelineItem::LashlangCode("finish 1".to_string())].into();
+    app.expand_level = 0;
+    app.set_rlm_dialect(Some(crate::execution_settings::RlmDialect::Typescript));
+
+    let text: Vec<String> = render_block_lines(&app, 0, 80, 24)
+        .into_iter()
+        .map(line_to_plain_text)
+        .collect();
+
+    assert_eq!(
+        text,
+        vec!["◇ typescript · 1 line — Alt+O to expand".to_string()],
+        "stub row should name the session dialect",
+    );
 }
 
 #[test]
@@ -1408,15 +1428,19 @@ fn live_reasoning_compacts_after_activity_appends_below_it() {
         "live reasoning should expand while it is the tail; got {live_text:?}",
     );
 
-    app.handle_session_event(lash_core::SessionStreamEvent::ToolCall {
-        call_id: None,
-        name: "read_file".into(),
-        args: serde_json::json!({ "path": "crates/lash/src/provider.rs" }),
-        output: lash_core::ToolCallOutput::success(
-            serde_json::json!({ "content": "provider code" }),
-        ),
-        duration_ms: 0,
-    });
+    app.handle_turn_activity(lash::TurnActivity::independent(
+        lash::TurnEvent::ToolCallCompleted {
+            call_id: None,
+            name: "read_file".into(),
+            args: serde_json::json!({ "path": "crates/lash/src/provider.rs" }),
+            output: lash::tools::ToolCallOutput::success(
+                serde_json::json!({ "content": "provider code" }),
+            ),
+            duration_ms: 0,
+            graph_key: None,
+            parent_call_id: None,
+        },
+    ));
 
     let compact_text: Vec<String> = app
         .rendered_block_lines_cached(0, 80, 24)
@@ -1452,9 +1476,11 @@ fn committed_reasoning_compacts_while_live_assistant_streams() {
     )]
     .into();
 
-    app.handle_session_event(lash_core::SessionStreamEvent::TextDelta {
-        content: "Answer is streaming.".into(),
-    });
+    app.handle_turn_activity(lash::TurnActivity::independent(
+        lash::TurnEvent::AssistantProseDelta {
+            text: "Answer is streaming.".into(),
+        },
+    ));
 
     let compact_text: Vec<String> = app
         .rendered_block_lines_cached(0, 80, 24)

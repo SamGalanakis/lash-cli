@@ -420,7 +420,7 @@ fn truncate_chars(value: String, limit: usize) -> String {
 }
 
 pub(crate) fn timeline_from_read_view(
-    read_view: &lash_core::SessionReadView,
+    read_view: &lash::persistence::SessionReadView,
     ui_state: &UiProjectionState,
 ) -> UiTimeline {
     let projection = read_view.chronological_projection();
@@ -493,18 +493,9 @@ fn activity_journal_insert_position(
     Some(turn_end)
 }
 
-#[cfg(test)]
-pub(crate) fn interrupted_blocks_from_read_view(
-    read_view: &lash_core::SessionReadView,
-    ui_state: &UiProjectionState,
-    status_message: impl Into<String>,
+fn timeline_from_chronological(
+    projection: &lash::persistence::ChronologicalProjection,
 ) -> UiTimeline {
-    let mut timeline = timeline_from_read_view(read_view, ui_state);
-    timeline.push_system_message_if_new(status_message.into());
-    timeline
-}
-
-fn timeline_from_chronological(projection: &lash_core::ChronologicalProjection) -> UiTimeline {
     let mut timeline = UiTimeline::new();
     let mut activity_state = ActivityState::default();
     let tool_call_map = HashMap::new();
@@ -602,70 +593,6 @@ pub(crate) fn smart_truncate_preview_line(text: &str, max_chars: usize) -> Strin
     format!("{prefix}{marker}{suffix}")
 }
 
-#[cfg(test)]
-pub(crate) fn strip_ansi_escape_sequences(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out = String::with_capacity(text.len());
-    let mut idx = 0usize;
-    while idx < bytes.len() {
-        if bytes[idx] == 0x1b {
-            idx += 1;
-            if idx >= bytes.len() {
-                break;
-            }
-            match bytes[idx] {
-                b'[' => {
-                    idx += 1;
-                    while idx < bytes.len() {
-                        let byte = bytes[idx];
-                        idx += 1;
-                        if (0x40..=0x7e).contains(&byte) {
-                            break;
-                        }
-                    }
-                }
-                b']' => {
-                    idx += 1;
-                    while idx < bytes.len() {
-                        match bytes[idx] {
-                            0x07 => {
-                                idx += 1;
-                                break;
-                            }
-                            0x1b if idx + 1 < bytes.len() && bytes[idx + 1] == b'\\' => {
-                                idx += 2;
-                                break;
-                            }
-                            _ => idx += 1,
-                        }
-                    }
-                }
-                b'P' | b'X' | b'^' | b'_' => {
-                    idx += 1;
-                    while idx < bytes.len() {
-                        if bytes[idx] == 0x1b && idx + 1 < bytes.len() && bytes[idx + 1] == b'\\' {
-                            idx += 2;
-                            break;
-                        }
-                        idx += 1;
-                    }
-                }
-                _ => {
-                    idx += 1;
-                }
-            }
-            continue;
-        }
-        if let Some(ch) = text[idx..].chars().next() {
-            out.push(ch);
-            idx += ch.len_utf8();
-        } else {
-            break;
-        }
-    }
-    out
-}
-
 fn append_transcript_items(
     timeline: &mut UiTimeline,
     message: &Message,
@@ -678,9 +605,11 @@ fn append_transcript_items(
     }
     match message.role {
         MessageRole::User => {
-            if message.parts.iter().any(|part| {
-                part_is_rlm_exec_result(part) || matches!(part.kind, PartKind::ToolResult)
-            }) {
+            if message
+                .parts
+                .iter()
+                .any(|part| matches!(part.kind, PartKind::ToolResult))
+            {
                 if render_tool_results {
                     for part in message.parts.iter() {
                         append_tool_result_items(timeline, part, tool_calls, activity_state);
@@ -714,7 +643,7 @@ fn append_transcript_items(
                     continue;
                 };
                 match part.kind {
-                    PartKind::Text | PartKind::Prose | PartKind::Image => prose.push(text),
+                    PartKind::Text | PartKind::Prose | PartKind::Attachment => prose.push(text),
                     PartKind::ToolCall => {
                         flush_assistant_prose_items(timeline, &mut prose);
                     }
@@ -745,7 +674,7 @@ fn append_transcript_items(
 }
 
 fn is_internal_rlm_message(message: &Message) -> bool {
-    let Some(lash_core::MessageOrigin::Plugin { plugin_id, .. }) = &message.origin else {
+    let Some(lash::messages::MessageOrigin::Plugin { plugin_id, .. }) = &message.origin else {
         return false;
     };
     if plugin_id != "rlm_protocol" {
@@ -763,24 +692,12 @@ fn is_internal_rlm_message(message: &Message) -> bool {
     }
 }
 
-/// True when a legacy user-message part carries an RLM exec result.
-/// Current RLM history uses trajectory events instead; these old
-/// messages should stay off rather than render as fake tool calls.
-fn part_is_rlm_exec_result(part: &lash_core::Part) -> bool {
-    matches!(part.kind, PartKind::Text)
-        && part.tool_call_id.is_some()
-        && part.tool_name.as_deref() == Some("execute_lashlang")
-}
-
 fn append_tool_result_items(
     timeline: &mut UiTimeline,
-    part: &lash_core::Part,
+    part: &lash::messages::Part,
     tool_calls: &HashMap<&str, ToolCallRecord>,
     activity_state: &mut ActivityState,
 ) {
-    if part_is_rlm_exec_result(part) {
-        return;
-    }
     if !matches!(part.kind, PartKind::ToolResult) {
         return;
     }
@@ -847,7 +764,7 @@ pub(crate) fn rendered_message_text(message: &Message) -> String {
 fn rendered_part_text(kind: &PartKind, content: &str) -> Option<String> {
     match kind {
         PartKind::Reasoning | PartKind::ToolCall | PartKind::ToolResult => None,
-        PartKind::Image => Some("[Image attached]".to_string()),
+        PartKind::Attachment => Some("[Attachment]".to_string()),
         _ => (!content.trim().is_empty()).then(|| content.to_string()),
     }
 }

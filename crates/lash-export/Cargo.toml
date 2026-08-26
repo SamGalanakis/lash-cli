@@ -6,6 +6,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+lash = { workspace = true }
 lash-core = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-sqlite-store = { workspace = true }
@@ -19,6 +20,8 @@ clap = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [dev-dependencies]
+lash = { workspace = true, features = ["testing"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = { workspace = true }
 
 [[bin]]

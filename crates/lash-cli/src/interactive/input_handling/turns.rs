@@ -61,7 +61,7 @@ async fn enqueue_prepared_turn_for_cli(
     app: &mut App,
     ui_trace: &mut Option<UiTraceRecorder>,
     runtime: &Option<LashSession>,
-    ingress: lash_core::TurnInputIngress,
+    ingress: lash::persistence::TurnInputIngress,
     show_preview: bool,
 ) -> bool {
     let Some(session) = runtime.as_ref() else {
@@ -355,7 +355,7 @@ async fn handle_tab_submit(ctx: &mut SessionCtx<'_>) -> anyhow::Result<bool> {
             ctx.app,
             ctx.ui_trace,
             ctx.runtime,
-            lash_core::TurnInputIngress::NextTurn,
+            lash::persistence::TurnInputIngress::NextTurn,
             true,
         )
         .await;
@@ -474,7 +474,7 @@ async fn handle_enter_submit(ctx: &mut SessionCtx<'_>) -> anyhow::Result<bool> {
                     ctx.app,
                     ctx.ui_trace,
                     ctx.runtime,
-                    lash_core::TurnInputIngress::NextTurn,
+                    lash::persistence::TurnInputIngress::NextTurn,
                     true,
                 )
                 .await;
@@ -506,13 +506,20 @@ async fn handle_enter_submit(ctx: &mut SessionCtx<'_>) -> anyhow::Result<bool> {
             ctx.app.restore_prepared_turn(queued);
             return Ok(false);
         };
-        let active_turn_id = format!("cli-turn:{}", *ctx.active_stream_id);
+        let Some(active_turn_id) = ctx.app.active_turn_id().map(ToOwned::to_owned) else {
+            push_system_message(
+                ctx.app,
+                "Current-turn injection is unavailable until Lash reports the active turn identity.",
+            );
+            ctx.app.restore_prepared_turn(queued);
+            return Ok(false);
+        };
         match enqueue_prepared_turn(
             session,
             &queued,
-            lash_core::TurnInputIngress::active_turn(
+            lash::persistence::TurnInputIngress::active_turn(
                 active_turn_id,
-                lash_core::TurnInputCheckpointBoundary::AfterWork,
+                lash::persistence::TurnInputCheckpointBoundary::AfterWork,
             ),
         )
         .await
@@ -587,7 +594,7 @@ async fn handle_enter_submit(ctx: &mut SessionCtx<'_>) -> anyhow::Result<bool> {
                 ctx.app,
                 ctx.ui_trace,
                 ctx.runtime,
-                lash_core::TurnInputIngress::NextTurn,
+                lash::persistence::TurnInputIngress::NextTurn,
                 true,
             )
             .await;

@@ -160,8 +160,8 @@ pub(crate) fn shortcut_help_rows(
     }
 
     lines.extend([
-        ShortcutHelpRow::new("Ctrl+O", "Cycle tool expansion"),
-        ShortcutHelpRow::new("Alt+O", "Full expansion"),
+        ShortcutHelpRow::new("Ctrl+O", "Cycle tool expansion (or `/expand`)"),
+        ShortcutHelpRow::new("Alt+O", "Full expansion (or `/expand full`)"),
         ShortcutHelpRow::new(history_arrows, "Input history"),
     ]);
 

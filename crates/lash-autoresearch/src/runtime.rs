@@ -5,19 +5,22 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use lash_core::plugin::{
-    PluginCommand, PluginCommandContext, PluginCommandOutcome, PluginDirective, PluginError,
-    PluginFactory, PluginOperation, PluginOperationFailure, PluginRegistrar,
-    PluginRuntimeDirective, PluginSessionContext, PluginSnapshotMeta, PluginTask,
-    PluginTaskContext, PluginTaskOutcome, PromptHookContext, SessionParam, SessionPlugin,
-    SnapshotReader, SnapshotWriter, ToolCallHookContext, ToolCatalogContext, ToolResultHookContext,
-    TurnResultHookContext,
+use lash::messages::MessageRole;
+use lash::plugins::{
+    EnqueueMessagesDirective, PluginCommand, PluginCommandContext, PluginDirective, PluginError,
+    PluginFactory, PluginOperation, PluginOperationFailure, PluginOperationOutcome,
+    PluginRegistrar, PluginRuntimeDirective, PluginSessionContext, PluginSnapshotMeta, PluginTask,
+    PluginTaskContext, PromptHookContext, SessionParam, SessionPlugin, SnapshotReader,
+    SnapshotWriter, ToolCallHookContext, ToolCatalogContext, ToolCatalogContribution,
+    ToolResultHookContext, TurnResultHookContext,
 };
-use lash_core::{
-    MessageRole, PluginMessage, PluginRuntimeEvent, PromptContribution, ToolCall,
-    ToolCatalogContribution, ToolContext, ToolContract, ToolDefinition, ToolManifest, ToolProvider,
-    ToolResult, ToolScheduling,
+use lash::plugins::{PluginMessage, PluginRuntimeEvent};
+use lash::prompt::PromptContribution;
+use lash::tools::{
+    ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome, ToolProvider,
 };
+use lash::{TurnInput, TurnOutcome};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::AsyncReadExt;
@@ -75,20 +78,20 @@ struct SummaryState {
     last_run: Option<LastRunSummary>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, lash_core::JsonSchema)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct AutoresearchEmptyArgs {}
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, lash_core::JsonSchema)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct AutoresearchStartArgs {
     pub objective: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, lash_core::JsonSchema)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct AutoresearchCommandArgs {
     pub raw: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, lash_core::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AutoresearchCommandOutput {
     pub status: StatusSummary,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -96,7 +99,7 @@ pub struct AutoresearchCommandOutput {
     pub message: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, lash_core::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AutoresearchExportOutput {
     pub status: StatusSummary,
     pub path: String,
@@ -151,11 +154,11 @@ async fn run_autoresearch_command(
     root: &Path,
     state: &Arc<Mutex<RuntimeState>>,
     args: AutoresearchCommandArgs,
-) -> Result<PluginCommandOutcome<AutoresearchCommandOutput>, PluginOperationFailure> {
+) -> Result<PluginOperationOutcome<AutoresearchCommandOutput>, PluginOperationFailure> {
     let raw = args.raw.as_deref().map(str::trim).unwrap_or_default();
     if raw.eq_ignore_ascii_case("help") {
-        let status: StatusSummary = tool_result_output(status_tool_result(root, state))?;
-        return Ok(PluginCommandOutcome::new(AutoresearchCommandOutput {
+        let status: StatusSummary = tool_outcome_output(status_tool_outcome(root, state))?;
+        return Ok(PluginOperationOutcome::new(AutoresearchCommandOutput {
             status,
             queued_input: None,
             message: autoresearch_help_text(),
@@ -176,14 +179,15 @@ async fn run_autoresearch_command(
         )
         .await
     };
-    let output: AutoresearchCommandOutput = tool_result_output(result)?;
+    let output: AutoresearchCommandOutput = tool_outcome_output(result)?;
     let mut directives = Vec::new();
     if let Some(input) = output.queued_input.clone() {
-        directives.push(PluginRuntimeDirective::queue_turn(
-            lash_core::TurnInput::text(input),
-        ));
+        directives.push(PluginRuntimeDirective::QueueTurn {
+            input: TurnInput::text(input),
+            source_key: None,
+        });
     }
-    Ok(PluginCommandOutcome::new(output.clone())
+    Ok(PluginOperationOutcome::new(output.clone())
         .with_events(vec![status_event(&output.status)?])
         .with_directives(directives))
 }
@@ -278,9 +282,10 @@ impl SessionPlugin for AutoresearchPlugin {
                             state.running.clone(),
                             state.last_run.clone(),
                         );
-                        return Ok(vec![PluginDirective::emit_runtime_events(vec![
-                            status_event(&summary)?,
-                        ])]);
+                        return Ok(vec![
+                            PluginDirective::emit_runtime_events(vec![status_event(&summary)?])
+                                .into(),
+                        ]);
                     }
                     Ok(Vec::new())
                 })
@@ -300,9 +305,9 @@ impl SessionPlugin for AutoresearchPlugin {
                         return Ok(Vec::new());
                     }
                     let summary = full_summary_from_runtime(&after_root, &after_state)?;
-                    Ok(vec![PluginDirective::emit_runtime_events(vec![
-                        status_event(&summary)?,
-                    ])])
+                    Ok(vec![
+                        PluginDirective::emit_runtime_events(vec![status_event(&summary)?]).into(),
+                    ])
                 })
             }));
 
@@ -318,7 +323,7 @@ impl SessionPlugin for AutoresearchPlugin {
                 if !state.mode.active
                     || !matches!(
                         &ctx.turn.outcome,
-                        lash_core::TurnOutcome::Finished(_) | lash_core::TurnOutcome::AgentFrameSwitch { .. }
+                        TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
                     )
                 {
                     return Ok(Vec::new());
@@ -346,9 +351,10 @@ impl SessionPlugin for AutoresearchPlugin {
                         ),
                     );
                 }
-                Ok(vec![PluginDirective::EnqueueMessages {
+                Ok(vec![EnqueueMessagesDirective {
                     messages: vec![PluginMessage::text(MessageRole::System, message)],
-                }])
+                }
+                .into()])
             })
         }));
 
@@ -370,8 +376,8 @@ impl SessionPlugin for AutoresearchPlugin {
                 let state = Arc::clone(&state);
                 async move {
                     let output: AutoresearchExportOutput =
-                        tool_result_output(export_summary(&root, &state))?;
-                    Ok(PluginTaskOutcome::new(output.clone())
+                        tool_outcome_output(export_summary(&root, &state))?;
+                    Ok(PluginOperationOutcome::new(output.clone())
                         .with_events(vec![status_event(&output.status)?]))
                 }
             }
@@ -445,15 +451,13 @@ use tools::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::InputItem;
-    use lash_core::plugin::{PluginHost, PluginRuntimeDirective};
-    use lash_core::testing::MockSessionManager;
+    use lash::InputItem;
+    use lash::plugins::{PluginHost, PluginRuntimeDirective};
+    use lash::testing::MockSessionManager;
     use tempfile::tempdir;
 
-    fn command_context(
-        manager: Arc<MockSessionManager>,
-    ) -> lash_core::plugin::PluginCommandContext {
-        lash_core::plugin::PluginCommandContext {
+    fn command_context(manager: Arc<MockSessionManager>) -> lash::plugins::PluginCommandContext {
+        lash::plugins::PluginCommandContext {
             session_id: Some("root".to_string()),
             sessions: manager.clone(),
             session_lifecycle: manager.clone(),
@@ -471,7 +475,7 @@ mod tests {
             state,
         }) as Arc<dyn ToolProvider>;
         let registry =
-            lash_core::ToolRegistry::from_tool_provider(provider).expect("tool registry");
+            lash::tools::ToolRegistry::from_tool_provider(provider).expect("tool registry");
         Arc::new(MockSessionManager::default().with_tool_registry(registry))
     }
 
@@ -480,7 +484,7 @@ mod tests {
             PluginRuntimeDirective::QueueTurn { input, .. } => {
                 input.items.iter().find_map(|item| match item {
                     InputItem::Text { text } => Some(text.as_str()),
-                    InputItem::ImageRef { .. } => None,
+                    InputItem::Attachment { .. } => None,
                 })
             }
         }
@@ -568,11 +572,11 @@ mod tests {
             workdir: dir.path().to_path_buf(),
             state: Arc::clone(&state),
         })];
-        factories.extend(lash_core::testing::test_code_protocol_factories());
+        factories.extend(lash::testing::test_code_protocol_factories());
         let host = PluginHost::new(factories);
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
 
-        let members = |session: &Arc<lash_core::plugin::PluginSession>| {
+        let members = |session: &Arc<lash::plugins::PluginSession>| {
             session
                 .resolved_tool_catalog("root")
                 .expect("catalog")
@@ -686,7 +690,7 @@ mod tests {
     fn autoresearch_export_writes_artifact_without_ui_status_rpc() {
         let dir = tempdir().expect("tempdir");
         let state = Arc::new(Mutex::new(RuntimeState::default()));
-        let start: AutoresearchCommandOutput = tool_result_output(start_mode(
+        let start: AutoresearchCommandOutput = tool_outcome_output(start_mode(
             dir.path(),
             &state,
             serde_json::json!({ "objective": "improve latency" }),
@@ -695,7 +699,7 @@ mod tests {
         assert!(start.status.active);
 
         let output: AutoresearchExportOutput =
-            tool_result_output(export_summary(dir.path(), &state)).expect("export");
+            tool_outcome_output(export_summary(dir.path(), &state)).expect("export");
 
         assert!(output.status.active);
         assert!(Path::new(&output.path).exists());

@@ -10,21 +10,22 @@ mod config;
 mod diff;
 mod editor;
 mod event;
-mod examples;
 mod execution_settings;
 mod fork;
 mod host_docs;
+mod host_policy;
 mod info;
 mod input_items;
 mod instructions;
 mod interactive;
 mod keybindings;
 mod markdown;
+mod mcp_discovery;
 mod model_catalog;
 mod model_selection;
 mod overlay;
 mod paths;
-mod persistence;
+mod plan_plugin;
 mod plugin_surface;
 mod prompt_context_plugin;
 mod prompt_model;
@@ -61,7 +62,7 @@ use lash::tracing::TraceLevel;
 #[cfg(test)]
 use lash::{InputItem, TurnActivity, TurnEvent};
 
-use execution_settings::RlmTerminationMode;
+use execution_settings::{RlmDialect, RlmTerminationMode};
 
 #[cfg(test)]
 use app::PreparedTurn;
@@ -122,24 +123,24 @@ impl From<CliTraceLevel> for TraceLevel {
 #[global_allocator]
 static GLOBAL_ALLOCATOR: DhatAlloc = DhatAlloc;
 
-fn turn_has_visible_output(turn: &lash::TurnResult) -> bool {
+fn turn_has_visible_output(turn: &lash::TurnReport) -> bool {
     !turn.assistant_output.safe_text.trim().is_empty() || !turn.errors.is_empty()
 }
 
 fn completed_turn_should_warn_no_visible_output(
-    outcome: &lash_core::TurnOutcome,
+    outcome: &lash::TurnOutcome,
     result_has_visible_output: bool,
     active_turn_had_visible_output: bool,
 ) -> bool {
     matches!(
         outcome,
-        lash_core::TurnOutcome::Finished(_) | lash_core::TurnOutcome::AgentFrameSwitch { .. }
+        lash::TurnOutcome::Finished(_) | lash::TurnOutcome::AgentFrameSwitch { .. }
     ) && !result_has_visible_output
         && !active_turn_had_visible_output
 }
 
 pub(crate) fn turn_should_warn_no_visible_output(
-    turn: &lash::TurnResult,
+    turn: &lash::TurnReport,
     active_turn_had_visible_output: bool,
 ) -> bool {
     completed_turn_should_warn_no_visible_output(
@@ -157,14 +158,6 @@ fn normalized_cli_args() -> Vec<std::ffi::OsString> {
     }
     for arg in iter {
         if let Some(raw) = arg.to_str() {
-            if raw == "-ca" {
-                out.push("--context-approach".into());
-                continue;
-            }
-            if let Some(value) = raw.strip_prefix("-ca=") {
-                out.push(format!("--context-approach={value}").into());
-                continue;
-            }
             if raw == "-em" {
                 out.push("--execution-mode".into());
                 continue;
@@ -202,44 +195,9 @@ struct Args {
     #[arg(long = "execution-mode")]
     execution_mode: Option<String>,
 
-    /// Standard-mode context approach (`rolling_history` or `observational_memory`)
-    #[arg(short = 'c', long = "context-approach", value_name = "APPROACH")]
-    standard_context_approach: Option<String>,
-
-    /// OM: observe once recent raw history reaches this many tokens
-    #[arg(long = "om-observation-message-tokens", value_name = "TOKENS")]
-    om_observation_message_tokens: Option<usize>,
-
-    /// OM: keep this many recent raw-history tokens unobserved on the active tail
-    #[arg(long = "om-observation-buffer-tokens", value_name = "TOKENS")]
-    om_observation_buffer_tokens: Option<usize>,
-
-    /// OM: hard ceiling for unobserved raw-history tokens before the tail is fully eligible
-    #[arg(long = "om-observation-block-after-tokens", value_name = "TOKENS")]
-    om_observation_block_after_tokens: Option<usize>,
-
-    /// OM: maximum tokens per observer batch sent to the background worker
-    #[arg(long = "om-observation-max-tokens-per-batch", value_name = "TOKENS")]
-    om_observation_max_tokens_per_batch: Option<usize>,
-
-    /// OM: how much prior memory text to carry into observer runs
-    #[arg(long = "om-previous-observer-tokens", value_name = "TOKENS")]
-    om_previous_observer_tokens: Option<usize>,
-
-    /// OM: reflect once accumulated memory reaches this many tokens
-    #[arg(long = "om-reflection-observation-tokens", value_name = "TOKENS")]
-    om_reflection_observation_tokens: Option<usize>,
-
-    /// OM: start reflection buffering at this percent of reflection tokens
-    #[arg(
-        long = "om-reflection-buffer-activation-percent",
-        value_name = "PERCENT"
-    )]
-    om_reflection_buffer_activation_percent: Option<u16>,
-
-    /// OM: hard ceiling for reflection memory tokens
-    #[arg(long = "om-reflection-block-after-tokens", value_name = "TOKENS")]
-    om_reflection_block_after_tokens: Option<usize>,
+    /// RLM language pinned for the lifetime of the session
+    #[arg(long = "rlm-dialect", value_parser = execution_settings::parse_rlm_dialect)]
+    rlm_dialect: Option<RlmDialect>,
 
     /// RLM modes only: project a read-only bound variable from JSON for the autonomous turn, for example `--rlm-var input='{\"path\":\"src\"}'`
     #[arg(long = "rlm-var", value_name = "NAME=JSON")]
@@ -273,7 +231,7 @@ struct Args {
     #[arg(long, value_name = "MS")]
     debug_ui_trace_interval_ms: Option<u64>,
 
-    /// Resume an existing session by id, name, or legacy .db filename
+    /// Resume an existing session by id or name (legacy .db files are refused)
     #[arg(long, value_name = "ID_OR_NAME")]
     resume: Option<String>,
 
@@ -285,7 +243,7 @@ struct Args {
     #[arg(long)]
     provider: bool,
 
-    /// Delete all lash data (~/.lash/ and ~/.cache/lash/) and exit
+    /// Delete the unified runtime store and session roster, then exit
     #[arg(long)]
     reset: bool,
 
@@ -396,7 +354,15 @@ async fn run_export(
     out: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
     let format = lash_export::ExportFormat::parse(format)?;
-    let rendered = lash_export::export(std::path::Path::new(db), trace, format, out).await?;
+    let rendered = lash_export::export(
+        &crate::paths::store_dir(),
+        db,
+        &[db.to_string()],
+        trace,
+        format,
+        out,
+    )
+    .await?;
     if out.is_none() {
         print!("{rendered}");
     }
@@ -528,7 +494,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use lash_core::session_model::MessageRole;
+    use lash::messages::MessageRole;
 
     use crate::app::App;
     use crate::keybindings::{CopyBinding, copy_binding_from_env};
@@ -630,7 +596,7 @@ mod tests {
         std::fs::write(&file_path, "x").expect("write temp file");
         let original_cwd = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(&tmp_path).expect("chdir");
-        let (items, image_blobs) = build_items_from_editor_input(
+        let items = build_items_from_editor_input(
             "before [Image #1] @a.txt after",
             vec![app::PendingImage {
                 id: 1,
@@ -644,7 +610,7 @@ mod tests {
             .iter()
             .map(|item| match item {
                 InputItem::Text { .. } => "text",
-                InputItem::ImageRef { .. } => "image",
+                InputItem::Attachment { .. } => "image",
             })
             .collect();
         assert_eq!(kinds, vec!["text", "image", "text"]);
@@ -654,12 +620,11 @@ mod tests {
         };
         assert!(tail_text.contains("[file:"));
         assert!(tail_text.ends_with(" after"));
-        assert_eq!(image_blobs.len(), 1);
     }
 
     #[test]
     fn build_items_drops_removed_image_markers() {
-        let (items, image_blobs) = build_items_from_editor_input(
+        let items = build_items_from_editor_input(
             "before after",
             vec![app::PendingImage {
                 id: 1,
@@ -670,9 +635,8 @@ mod tests {
         assert!(
             items
                 .iter()
-                .all(|item| !matches!(item, InputItem::ImageRef { .. }))
+                .all(|item| !matches!(item, InputItem::Attachment { .. }))
         );
-        assert!(image_blobs.is_empty());
     }
 
     #[test]
@@ -688,7 +652,7 @@ mod tests {
     fn autonomous_renderer_prints_missing_final_tail_after_streamed_prefix() {
         let mut renderer = AutonomousRenderer::new();
         let _ = renderer.handle(TurnActivity::independent(TurnEvent::AssistantProseDelta {
-            text: "Inspected files.\n".to_string(),
+            text: "Inspected files.\n".into(),
         }));
 
         renderer.finish_output("Inspected files.\nCompleted successfully.");
@@ -701,7 +665,7 @@ mod tests {
 
     #[test]
     fn no_visible_output_warning_is_suppressed_after_live_output() {
-        let outcome = lash_core::TurnOutcome::Finished(lash_core::TurnFinish::FinalValue {
+        let outcome = lash::TurnOutcome::Finished(lash::TurnFinish::FinalValue {
             value: serde_json::Value::Null,
         });
 
@@ -840,7 +804,7 @@ mod tests {
         let message = make_injected_plugin_message(&turn).await;
 
         assert_eq!(message.role, MessageRole::User);
-        assert!(message.images.is_empty());
+        assert!(message.attachments.is_empty());
         assert_eq!(injected_image_part_indices(&message).len(), 2);
         assert!(
             message

@@ -1,13 +1,12 @@
 //! Version/info text and the Info/Help/Controls document overlays.
 
 use lash::provider::ProviderHandle;
-use lash_standard_plugins::StandardContextApproach;
 use lash_tui_extensions::TuiExtensions;
 
 use crate::SkillCatalog;
 use crate::command;
 use crate::execution_settings::{
-    ExecutionMode, execution_mode_label, execution_mode_usage, standard_context_approach_label,
+    ExecutionMode, RlmDialect, execution_mode_label, execution_mode_usage,
 };
 use crate::keybindings::shortcut_help_rows;
 use crate::model_selection::provider_display_label;
@@ -16,16 +15,33 @@ use crate::overlay::{DocumentRow, DocumentSection, DocumentState};
 pub(crate) fn version_text() -> String {
     format!(
         "lash-cli {}
-lash-sansio {}",
+durable formats: {}",
         crate::APP_VERSION,
-        lash_core::SANSIO_VERSION
+        durable_formats_text()
     )
+}
+
+fn durable_formats_text() -> String {
+    let mut formats = vec![
+        format!(
+            "session schema={}",
+            lash_sqlite_store::SESSION_SCHEMA_VERSION
+        ),
+        format!("trace schema={}", lash_trace::TRACE_SCHEMA_VERSION),
+        format!("remote protocol={}", lash::remote::REMOTE_PROTOCOL_VERSION),
+    ];
+    formats.extend(
+        lash::formats::durable_formats()
+            .iter()
+            .map(|entry| format!("{}={}", entry.format.name(), entry.version)),
+    );
+    formats.join(", ")
 }
 
 pub(crate) fn info_text_unconfigured(execution_mode: &ExecutionMode, cwd: &str) -> String {
     [
         format!("lash-cli: {}", crate::APP_VERSION),
-        format!("lash-sansio: {}", lash_core::SANSIO_VERSION),
+        format!("durable formats: {}", durable_formats_text()),
         "provider: (not configured)".to_string(),
         "configured model: (not configured)".to_string(),
         "resolved model: (not configured)".to_string(),
@@ -43,7 +59,7 @@ pub(crate) fn info_text(
     configured_model: &str,
     model_variant: Option<&str>,
     execution_mode: &ExecutionMode,
-    standard_context_approach: Option<&StandardContextApproach>,
+    rlm_dialect: Option<RlmDialect>,
     context_window: Option<u64>,
     tool_summary: Option<(usize, &str)>,
     cwd: &str,
@@ -55,7 +71,7 @@ pub(crate) fn info_text(
         crate::provider_metadata::provider_wire_model_id(provider.kind(), configured_model);
     let mut lines = vec![
         format!("lash-cli: {}", crate::APP_VERSION),
-        format!("lash-sansio: {}", lash_core::SANSIO_VERSION),
+        format!("durable formats: {}", durable_formats_text()),
         format!(
             "provider: {} ({})",
             provider_display_label(provider),
@@ -65,13 +81,8 @@ pub(crate) fn info_text(
         format!("resolved model: {}", resolved_model),
         format!("execution mode: {}", execution_mode_label(execution_mode)),
     ];
-    if *execution_mode == ExecutionMode::Standard
-        && let Some(standard_context_approach) = standard_context_approach
-    {
-        lines.push(format!(
-            "context approach: {}",
-            standard_context_approach_label(standard_context_approach)
-        ));
+    if let Some(dialect) = rlm_dialect {
+        lines.push(format!("rlm dialect: {}", dialect.language_id()));
     }
 
     if let Some(variant) = model_variant {
@@ -108,7 +119,7 @@ pub(crate) fn info_document(
     configured_model: &str,
     model_variant: Option<&str>,
     execution_mode: &ExecutionMode,
-    standard_context_approach: Option<&StandardContextApproach>,
+    rlm_dialect: Option<RlmDialect>,
     context_window: Option<u64>,
     tool_summary: Option<(usize, &str)>,
     cwd: &str,
@@ -138,12 +149,10 @@ pub(crate) fn info_document(
             value: variant.to_string(),
         });
     }
-    if *execution_mode == ExecutionMode::Standard
-        && let Some(standard_context_approach) = standard_context_approach
-    {
+    if let Some(dialect) = rlm_dialect {
         model_rows.push(DocumentRow::KeyValue {
-            label: "context approach".to_string(),
-            value: standard_context_approach_label(standard_context_approach).to_string(),
+            label: "rlm dialect".to_string(),
+            value: dialect.language_id().to_string(),
         });
     }
     model_rows.push(DocumentRow::KeyValue {
@@ -301,6 +310,23 @@ pub(crate) fn help_document(skills: &SkillCatalog, ui_extensions: &TuiExtensions
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durable_format_versions_match_the_adopted_lash_pin() {
+        let displayed = durable_formats_text();
+        assert!(displayed.contains(&format!(
+            "session schema={}",
+            lash_sqlite_store::SESSION_SCHEMA_VERSION
+        )));
+        assert!(displayed.contains(&format!(
+            "trace schema={}",
+            lash_trace::TRACE_SCHEMA_VERSION
+        )));
+        assert!(displayed.contains(&format!(
+            "remote protocol={}",
+            lash::remote::REMOTE_PROTOCOL_VERSION
+        )));
+    }
     use crate::keybindings::ShortcutHelpRow;
 
     #[test]
@@ -370,7 +396,7 @@ mod tests {
             "google/gemini-3-flash-preview",
             Some("medium"),
             &ExecutionMode::Standard,
-            Some(&StandardContextApproach::RollingHistory(Default::default())),
+            None,
             Some(123_000),
             Some((7, "abcd1234")),
             cwd,
@@ -442,7 +468,7 @@ mod tests {
             "google/gemini-3-flash-preview",
             Some("medium"),
             &ExecutionMode::Standard,
-            Some(&StandardContextApproach::RollingHistory(Default::default())),
+            None,
             Some(123_000),
             Some((7, "abcd1234")),
             cwd,

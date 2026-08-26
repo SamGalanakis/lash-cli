@@ -75,12 +75,14 @@ pub fn process_lines_snapshot(app: &App, _frame_width: u16) -> Option<Vec<Line<'
     )]));
     for task in &app.processes {
         let selected = app.selected_process_id.as_deref() == Some(task.process_id.as_str());
-        let state = match task.status.terminal_state() {
-            None => "running",
-            Some(lash_core::ProcessTerminalState::Completed) => "success",
-            Some(lash_core::ProcessTerminalState::Failed) => "error",
-            Some(lash_core::ProcessTerminalState::Cancelled) => "cancelled",
-            Some(lash_core::ProcessTerminalState::Abandoned) => "abandoned",
+        let state = match task.status {
+            lash::process::ProcessStatus::Completed => "success",
+            lash::process::ProcessStatus::Failed => "error",
+            lash::process::ProcessStatus::Cancelled => "cancelled",
+            lash::process::ProcessStatus::Abandoned => "abandoned",
+            lash::process::ProcessStatus::Running
+            | lash::process::ProcessStatus::Waiting
+            | lash::process::ProcessStatus::CallerDeparted => "running",
         };
         let producer = task.definition.as_deref().unwrap_or(task.kind.as_str());
         let elapsed_duration = task
@@ -89,12 +91,14 @@ pub fn process_lines_snapshot(app: &App, _frame_width: u16) -> Option<Vec<Line<'
         let elapsed =
             crate::util::format_duration_ms_if_visible(elapsed_duration.as_millis() as u64)
                 .unwrap_or_else(|| "0:00".to_string());
-        let state_style = match task.status.terminal_state() {
-            None => theme::turn_status_state(),
-            Some(lash_core::ProcessTerminalState::Completed) => theme::tool_success(),
-            Some(lash_core::ProcessTerminalState::Failed)
-            | Some(lash_core::ProcessTerminalState::Cancelled)
-            | Some(lash_core::ProcessTerminalState::Abandoned) => theme::tool_failure(),
+        let state_style = match task.status {
+            lash::process::ProcessStatus::Completed => theme::tool_success(),
+            lash::process::ProcessStatus::Failed
+            | lash::process::ProcessStatus::Cancelled
+            | lash::process::ProcessStatus::Abandoned => theme::tool_failure(),
+            lash::process::ProcessStatus::Running
+            | lash::process::ProcessStatus::Waiting
+            | lash::process::ProcessStatus::CallerDeparted => theme::turn_status_state(),
         };
         let selected_chrome = theme::process_selected_chrome();
         let row_style = |style: Style| {

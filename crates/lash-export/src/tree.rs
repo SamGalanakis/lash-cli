@@ -1,8 +1,8 @@
-//! Multi-session export — discover descendant sessions reachable from a
-//! root `.db` and classify cross-session edges created by `spawn_agent`.
+//! Multi-session export — load catalogued descendants reachable from a
+//! root session and classify cross-session edges created by `spawn_agent`.
 //!
-//! The on-disk shape is one `.db` per session in `sessions_dir/`, each
-//! carrying its full session relation in `session_meta`. For subagents,
+//! Lash main keeps sessions in one durable-core catalog. Each session carries
+//! its full relation in `session_meta`. For subagents,
 //! `SessionRelation::Child.caused_by` anchors the child to
 //! the parent `spawn_agent` call without relying on model-authored names.
 //!
@@ -11,19 +11,20 @@
 //! by that field so each session in the tree gets its matching prompts.
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow};
-use lash_core::{ChronologicalEntry, SessionGraph, SessionMeta};
-use lash_sqlite_store::Store;
+use lash::persistence::{ChronologicalEntry, SessionRelation};
 
 use crate::trace::{LlmPromptSnapshot, load_prompts_from_trace};
+use crate::{
+    LoadSessionError, LoadedSessionMetadata, load_session, open_session_read_only, preflight_store,
+};
 
 /// One session in the tree, ready to render.
 pub struct LoadedSessionNode {
-    pub meta: SessionMeta,
+    pub meta: LoadedSessionMetadata,
     pub chronological: Vec<ChronologicalEntry>,
+    pub model_id: Option<String>,
     pub context_window_tokens: Option<u64>,
     pub llm_prompts: Vec<LlmPromptSnapshot>,
     pub db_path: PathBuf,
@@ -64,8 +65,9 @@ pub struct LoadedSessionTree {
 
 struct CandidateLoad {
     db_path: PathBuf,
-    meta: SessionMeta,
+    meta: LoadedSessionMetadata,
     chronological: Vec<ChronologicalEntry>,
+    model_id: Option<String>,
     context_window_tokens: Option<u64>,
 }
 
@@ -106,13 +108,19 @@ impl LoadedSessionTree {
     }
 }
 
-/// Discover descendant sessions starting from `root_db` and load the tree.
+/// Load the root and durable catalog, retaining descendants of root.
 ///
 /// `trace_path` may cover any subset of sessions in the tree; prompts are
 /// partitioned by `context.session_id`. Sessions for which no prompts are
 /// found in the trace render fine — they just don't show LLM-call rows.
-pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<LoadedSessionTree> {
-    let prompts_all = load_prompts_from_trace(trace_path)?;
+pub async fn load_tree_from_paths(
+    store_root: &Path,
+    root_session_id: &str,
+    _session_ids: &[String],
+    trace_path: &Path,
+) -> Result<LoadedSessionTree, LoadSessionError> {
+    preflight_store(store_root).await?;
+    let prompts_all = load_prompts_from_trace(trace_path).map_err(LoadSessionError::Trace)?;
     let mut prompts_by_session: HashMap<String, Vec<LlmPromptSnapshot>> = HashMap::new();
     let mut prompts_unkeyed: Vec<LlmPromptSnapshot> = Vec::new();
     for prompt in prompts_all {
@@ -122,49 +130,41 @@ pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<L
         }
     }
 
-    let root_dir = root_db
-        .parent()
-        .ok_or_else(|| anyhow!("root db path has no parent dir: {}", root_db.display()))?
-        .to_path_buf();
-
-    // First pass: load every .db in the directory. Sessions without a
-    // session_meta row get skipped silently.
     let mut candidates: Vec<CandidateLoad> = Vec::new();
-    let entries = fs::read_dir(&root_dir)
-        .with_context(|| format!("scanning sessions dir {}", root_dir.display()))?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("db") {
-            continue;
-        }
-        let Ok(store) = Store::open_readonly(&path).await else {
-            continue;
+    let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(store_root);
+    let summaries = lash::persistence::SessionStoreFactory::list_sessions(
+        &factory,
+        &lash::SessionListFilter {
+            relation: None,
+            deleted: Some(false),
+        },
+    )
+    .await
+    .map_err(LoadSessionError::Store)?;
+    for summary in summaries {
+        let session_id = summary.session_id;
+        let relation = summary
+            .durable_relation
+            .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.clone()))?;
+        let read_view = open_session_read_only(store_root, &session_id).await?;
+        let meta = LoadedSessionMetadata {
+            session_id: session_id.clone(),
+            relation,
         };
-        let Some(meta) = store.load_session_meta().await else {
-            continue;
-        };
-        let head = store.load_session_head().await;
-        let context_window_tokens = head
-            .as_ref()
-            .map(|h| h.config.model.context_window_tokens() as u64);
-        let graph = match head {
-            Some(head) => head.graph,
-            None => store.load_session_graph().await,
-        };
-        let chronological = build_chronological(graph);
+        let loaded = load_session(&read_view, &session_id, Some(meta.clone()))?;
         candidates.push(CandidateLoad {
-            db_path: path,
+            db_path: store_root.join("durable-core.db"),
             meta,
-            chronological,
-            context_window_tokens,
+            chronological: loaded.chronological,
+            model_id: loaded.model_id,
+            context_window_tokens: loaded.context_window_tokens,
         });
     }
 
-    // Locate the root by matching the root_db path.
     let root_idx = candidates
         .iter()
-        .position(|c| same_file(&c.db_path, root_db))
-        .ok_or_else(|| anyhow!("root db {} not found in sessions dir", root_db.display()))?;
+        .position(|candidate| candidate.meta.session_id == root_session_id)
+        .ok_or_else(|| LoadSessionError::SessionNotFound(root_session_id.to_string()))?;
     let root_id = candidates[root_idx].meta.session_id.clone();
 
     // Walk the parent chain to keep only sessions reachable from root.
@@ -183,10 +183,13 @@ pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<L
             if keep[i] {
                 continue;
             }
-            let Some(parent_id) = c.meta.parent_session_id() else {
+            let SessionRelation::Child {
+                parent_session_id, ..
+            } = &c.meta.relation
+            else {
                 continue;
             };
-            let Some(&parent_idx) = by_id.get(parent_id) else {
+            let Some(&parent_idx) = by_id.get(parent_session_id) else {
                 continue;
             };
             if keep[parent_idx] {
@@ -210,8 +213,8 @@ pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<L
             continue;
         }
         match &c.meta.relation {
-            lash_core::SessionRelation::Root => {}
-            lash_core::SessionRelation::Child {
+            SessionRelation::Root => {}
+            SessionRelation::Child {
                 parent_session_id,
                 caused_by,
             } => {
@@ -225,6 +228,7 @@ pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<L
                     },
                 );
             }
+            SessionRelation::Fork { .. } => {}
         }
     }
 
@@ -238,7 +242,7 @@ pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<L
             if !keep[child_idx] {
                 continue;
             }
-            let lash_core::SessionRelation::Child {
+            let SessionRelation::Child {
                 parent_session_id,
                 caused_by,
             } = &child.meta.relation
@@ -274,16 +278,9 @@ pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<L
         let kind = if sid == root_id {
             NodeRelation::Root
         } else {
-            node_kinds.remove(&sid).unwrap_or(NodeRelation::Subagent {
-                parent_session_id: c
-                    .meta
-                    .parent_session_id()
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_else(|| root_id.clone()),
-                task: None,
-                capability: None,
-                parent_call_id: None,
-            })
+            node_kinds
+                .remove(&sid)
+                .expect("retained non-root sessions are child relations")
         };
         let llm_prompts = prompts_by_session.remove(&sid).unwrap_or_else(|| {
             if sid == root_id {
@@ -295,6 +292,7 @@ pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<L
         nodes.push(LoadedSessionNode {
             meta: c.meta,
             chronological: c.chronological,
+            model_id: c.model_id,
             context_window_tokens: c.context_window_tokens,
             llm_prompts,
             db_path: c.db_path,
@@ -310,25 +308,9 @@ pub async fn load_tree_from_paths(root_db: &Path, trace_path: &Path) -> Result<L
     })
 }
 
-fn build_chronological(graph: SessionGraph) -> Vec<ChronologicalEntry> {
-    let state = lash_core::SessionSnapshot {
-        session_graph: graph,
-        ..lash_core::SessionSnapshot::default()
-    };
-    state.read_view().chronological_projection().into_entries()
-}
-
-fn tool_call_id_from_cause(caused_by: &Option<lash_core::CausalRef>) -> Option<String> {
+fn tool_call_id_from_cause(caused_by: &Option<lash::process::CausalRef>) -> Option<String> {
     match caused_by {
-        Some(lash_core::CausalRef::ToolCall { call_id, .. }) => Some(call_id.clone()),
+        Some(lash::process::CausalRef::ToolCall { call_id, .. }) => Some(call_id.clone()),
         _ => None,
     }
-}
-
-fn same_file(a: &Path, b: &Path) -> bool {
-    fs::canonicalize(a)
-        .ok()
-        .zip(fs::canonicalize(b).ok())
-        .map(|(a, b)| a == b)
-        .unwrap_or(false)
 }

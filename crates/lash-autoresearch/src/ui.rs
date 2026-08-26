@@ -209,7 +209,7 @@ impl TuiExtension for AutoresearchTuiExtension {
         if plugin_id != PLUGIN_ID {
             return Vec::new();
         }
-        let lash_core::PluginRuntimeEvent::Custom { name, payload } = event else {
+        let lash::plugins::PluginRuntimeEvent::Custom { name, payload } = event else {
             return Vec::new();
         };
         if name != "autoresearch.status" {

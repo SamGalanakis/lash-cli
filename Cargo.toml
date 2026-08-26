@@ -47,28 +47,29 @@ tokio-util = "0.7"
 tracing = "0.1"
 uuid = "1"
 
-# The CLI tracks one reviewed Lash revision. Dependency updates are explicit,
+# The CLI tracks one reviewed Lash release. Dependency updates are explicit,
 # testable compatibility changes rather than an implicit lockstep workspace.
-lash = { package = "lash-runtime", git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-core = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-lashlang-runtime = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-llm-tools = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-plugin-mcp = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-plugin-plan-mode = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-plugin-process-controls = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-protocol-rlm = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-protocol-standard = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-provider-anthropic = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-provider-auth = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-provider-google = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-provider-openai = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-rlm-types = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-sqlite-store = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-standard-plugins = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-subagents = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-tool-support = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lash-trace = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
-lashlang = { git = "https://github.com/SamGalanakis/lash", rev = "a4ba0f53c9043858af9c50001ec9629bbb43b3a7" }
+lash = { package = "lash-runtime", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-core = { package = "lash-internal-core", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-lashlang-runtime = { package = "lash-internal-lashlang-runtime", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-llm-tools = { package = "lash-internal-llm-tools", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-plugin-mcp = { package = "lash-internal-plugin-mcp", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+# lash-plugin-plan-mode removed upstream
+lash-plugin-process-controls = { package = "lash-internal-plugin-process-controls", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-protocol-rlm = { package = "lash-internal-protocol-rlm", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-protocol-standard = { package = "lash-internal-protocol-standard", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-provider-anthropic = { package = "lash-internal-provider-anthropic", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-provider-auth = { package = "lash-internal-provider-auth", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-provider-google = { package = "lash-internal-provider-google", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-provider-openai = { package = "lash-internal-provider-openai", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-rlm-types = { package = "lash-internal-rlm-types", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-sqlite-store = { package = "lash-internal-sqlite-store", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-standard-plugins = { package = "lash-internal-standard-plugins", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-subagents = { package = "lash-internal-subagents", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-tool-support = { package = "lash-internal-tool-support", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-trace = { package = "lash-internal-trace", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lash-typescript = { package = "lash-internal-typescript", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
+lashlang = { package = "lash-internal-lashlang", git = "https://github.com/Ascending-AI/lash.git", rev = "8dac97fa5" }
 
 lash-autoresearch = { path = "crates/lash-autoresearch" }
 lash-cli-perf = { path = "crates/lash-cli-perf" }

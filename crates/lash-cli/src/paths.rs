@@ -50,8 +50,42 @@ pub fn config_file() -> PathBuf {
     lash_home().join("config.json")
 }
 
+/// Root of Lash-owned durable stores for this CLI installation.
+pub fn store_dir() -> PathBuf {
+    lash_home().join("store")
+}
+
+pub fn durable_core_db() -> PathBuf {
+    store_dir().join("durable-core.db")
+}
+
+pub fn processes_db() -> PathBuf {
+    store_dir().join("processes.db")
+}
+
+pub fn triggers_db() -> PathBuf {
+    store_dir().join("triggers.db")
+}
+
+pub fn effects_db() -> PathBuf {
+    store_dir().join("effects.db")
+}
+
+pub fn artifacts_db() -> PathBuf {
+    store_dir().join("artifacts.db")
+}
+
+pub fn process_env_db() -> PathBuf {
+    store_dir().join("process-env.db")
+}
+
 pub fn attachments_dir() -> PathBuf {
-    lash_home().join("attachments")
+    store_dir().join("attachments")
+}
+
+/// Host-owned roster and UI sidecars keyed by Lash session id.
+pub fn sessions_dir() -> PathBuf {
+    lash_home().join("sessions")
 }
 
 /// Stable id for this CLI installation on this host, stored under `$LASH_HOME`.
