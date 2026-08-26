@@ -39,7 +39,7 @@ pub(crate) async fn make_injected_plugin_message(turn: &PreparedTurn) -> PluginM
                 parts.push(Part::attachment_part(
                     String::new(),
                     String::new(),
-                    Some(lash_core::session_model::message::PartAttachment { source }),
+                    Some(lash::messages::PartAttachment { source }),
                 ));
             }
         }

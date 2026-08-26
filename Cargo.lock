@@ -91,7 +91,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -102,7 +102,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -890,7 +890,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -966,7 +966,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2057,7 +2057,7 @@ name = "lash-autoresearch"
 version = "0.0.0-dev"
 dependencies = [
  "async-trait",
- "lash-lashlang-runtime",
+ "lash-internal-lashlang-runtime",
  "lash-runtime",
  "lash-tui",
  "lash-tui-extensions",
@@ -2086,31 +2086,30 @@ dependencies = [
  "image",
  "lash-autoresearch",
  "lash-cli-perf",
- "lash-core",
  "lash-debug-cli-harness",
  "lash-export",
  "lash-file-index",
- "lash-lashlang-runtime",
- "lash-llm-tools",
- "lash-plugin-mcp",
- "lash-plugin-process-controls",
- "lash-protocol-rlm",
- "lash-protocol-standard",
- "lash-provider-anthropic",
- "lash-provider-auth",
- "lash-provider-google",
- "lash-provider-openai",
- "lash-rlm-types",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-llm-tools",
+ "lash-internal-plugin-mcp",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-protocol-rlm",
+ "lash-internal-protocol-standard",
+ "lash-internal-provider-anthropic",
+ "lash-internal-provider-auth",
+ "lash-internal-provider-google",
+ "lash-internal-provider-openai",
+ "lash-internal-rlm-types",
+ "lash-internal-sqlite-store",
+ "lash-internal-standard-plugins",
+ "lash-internal-subagents",
+ "lash-internal-tool-support",
+ "lash-internal-trace",
  "lash-runtime",
  "lash-search-tools",
- "lash-sqlite-store",
- "lash-standard-plugins",
- "lash-subagents",
- "lash-tool-support",
- "lash-trace",
  "lash-tui",
  "lash-tui-extensions",
- "lashlang",
  "model2vec-rs",
  "pulldown-cmark",
  "rand 0.9.5",
@@ -2141,33 +2140,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-core"
-version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
-dependencies = [
- "arc-swap",
- "async-trait",
- "chrono",
- "futures-util",
- "hmac",
- "lash-http-transport",
- "lash-sansio",
- "lash-trace",
- "proptest",
- "rmp-serde",
- "schemars",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2",
- "thiserror 2.0.19",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "lash-debug-cli-harness"
 version = "0.0.0-dev"
 dependencies = [
@@ -2188,12 +2160,12 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "clap",
- "lash-core",
- "lash-protocol-rlm",
- "lash-rlm-types",
+ "lash-internal-core",
+ "lash-internal-protocol-rlm",
+ "lash-internal-rlm-types",
+ "lash-internal-sqlite-store",
+ "lash-internal-trace",
  "lash-runtime",
- "lash-sqlite-store",
- "lash-trace",
  "pulldown-cmark",
  "rusqlite",
  "serde",
@@ -2213,31 +2185,82 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-http-transport"
+name = "lash-internal-core"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "hmac",
+ "lash-internal-http-transport",
+ "lash-internal-sansio",
+ "lash-internal-trace",
+ "proptest",
+ "rmp-serde",
+ "schemars",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-http-transport"
+version = "0.0.0-dev"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "bytes",
  "httpdate",
- "lash-sansio",
+ "lash-internal-sansio",
  "reqwest",
  "thiserror 2.0.19",
  "tokio",
 ]
 
 [[package]]
-name = "lash-lashlang-runtime"
+name = "lash-internal-lashlang"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
+dependencies = [
+ "async-trait",
+ "compact_str 0.9.1",
+ "futures-executor",
+ "lash-internal-core",
+ "lash-internal-sansio",
+ "lash-regress",
+ "num-bigint",
+ "num-traits",
+ "rmp-serde",
+ "rustc-hash 2.1.3",
+ "ryu-js",
+ "serde",
+ "serde_json",
+ "sha2",
+ "smallvec",
+ "thiserror 2.0.19",
+ "url",
+]
+
+[[package]]
+name = "lash-internal-lashlang-runtime"
+version = "0.0.0-dev"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "chrono",
- "lash-core",
- "lash-remote-protocol",
- "lash-sansio",
- "lash-trace",
- "lashlang",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-remote-protocol",
+ "lash-internal-sansio",
+ "lash-internal-trace",
  "serde",
  "serde_json",
  "sha2",
@@ -2249,37 +2272,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-llm-tools"
+name = "lash-internal-llm-tools"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "jsonschema",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-sansio",
- "lash-tool-support",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
  "serde_json",
 ]
 
 [[package]]
-name = "lash-llm-transport"
+name = "lash-internal-llm-transport"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "bytes",
- "lash-core",
- "lash-http-transport",
- "lash-sansio",
+ "lash-internal-core",
+ "lash-internal-http-transport",
+ "lash-internal-sansio",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "lash-plugin-mcp"
+name = "lash-internal-plugin-mcp"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2287,10 +2310,10 @@ dependencies = [
  "futures-util",
  "http",
  "jsonschema",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-sansio",
- "lash-tool-support",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
  "rmcp",
  "serde",
  "serde_json",
@@ -2301,42 +2324,42 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-plugin-process-controls"
+name = "lash-internal-plugin-process-controls"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-tool-support",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-tool-support",
  "serde_json",
 ]
 
 [[package]]
-name = "lash-plugin-tool-output-budget"
+name = "lash-internal-plugin-tool-output-budget"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
- "lash-core",
- "lash-protocol-standard",
+ "lash-internal-core",
+ "lash-internal-protocol-standard",
  "serde",
  "serde_json",
  "sha2",
 ]
 
 [[package]]
-name = "lash-protocol-rlm"
+name = "lash-internal-protocol-rlm"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "jsonschema",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-rlm-types",
- "lash-sansio",
- "lash-typescript",
- "lashlang",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-rlm-types",
+ "lash-internal-sansio",
+ "lash-internal-typescript",
  "rmp-serde",
  "serde",
  "serde_bytes",
@@ -2349,27 +2372,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-protocol-standard"
+name = "lash-internal-protocol-standard"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
- "lash-core",
- "lash-sansio",
- "lash-tool-support",
+ "lash-internal-core",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
  "serde_json",
 ]
 
 [[package]]
-name = "lash-provider-anthropic"
+name = "lash-internal-provider-anthropic"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
- "lash-core",
- "lash-llm-transport",
- "lash-sansio",
+ "lash-internal-core",
+ "lash-internal-llm-transport",
+ "lash-internal-sansio",
  "reqwest",
  "serde",
  "serde_json",
@@ -2377,15 +2400,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-provider-auth"
+name = "lash-internal-provider-auth"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "form_urlencoded",
- "lash-core",
- "lash-sansio",
+ "lash-internal-core",
+ "lash-internal-sansio",
  "reqwest",
  "serde_json",
  "sha2",
@@ -2395,16 +2418,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-provider-google"
+name = "lash-internal-provider-google"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
- "lash-core",
- "lash-llm-transport",
- "lash-provider-auth",
- "lash-sansio",
+ "lash-internal-core",
+ "lash-internal-llm-transport",
+ "lash-internal-provider-auth",
+ "lash-internal-sansio",
  "reqwest",
  "serde",
  "serde_json",
@@ -2414,21 +2437,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-provider-openai"
+name = "lash-internal-provider-openai"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bytes",
  "futures-util",
- "lash-core",
- "lash-llm-transport",
- "lash-provider-auth",
- "lash-sansio",
+ "lash-internal-core",
+ "lash-internal-llm-transport",
+ "lash-internal-provider-auth",
+ "lash-internal-sansio",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-tungstenite",
  "tracing",
@@ -2436,22 +2460,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-regress"
+name = "lash-internal-remote-protocol"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
-dependencies = [
- "hashbrown 0.16.1",
- "memchr",
-]
-
-[[package]]
-name = "lash-remote-protocol"
-version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "base64 0.22.1",
- "lash-core",
- "lash-sansio",
+ "lash-internal-core",
+ "lash-internal-sansio",
  "schemars",
  "serde",
  "serde_json",
@@ -2459,46 +2474,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-rlm-types"
+name = "lash-internal-rlm-types"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
- "lash-sansio",
+ "lash-internal-sansio",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "lash-runtime"
+name = "lash-internal-sansio"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
-dependencies = [
- "async-trait",
- "futures-util",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-plugin-tool-output-budget",
- "lash-protocol-rlm",
- "lash-protocol-standard",
- "lash-remote-protocol",
- "lash-rlm-types",
- "lash-sansio",
- "lash-tool-support",
- "lash-trace",
- "lashlang",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "lash-sansio"
-version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "jsonschema",
  "schemars",
@@ -2508,34 +2496,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-search-tools"
+name = "lash-internal-sqlite-store"
 version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "fff-search",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-tool-support",
- "regex",
- "schemars",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "lash-sqlite-store"
-version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
  "flate2",
  "futures-executor",
- "lash-core",
- "lash-sansio",
- "lashlang",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-sansio",
  "rmp-serde",
  "rusqlite",
  "serde",
@@ -2550,59 +2520,59 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-standard-plugins"
+name = "lash-internal-standard-plugins"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
- "lash-core",
- "lash-plugin-process-controls",
- "lash-plugin-tool-output-budget",
- "lash-sansio",
- "lash-tools",
+ "lash-internal-core",
+ "lash-internal-plugin-process-controls",
+ "lash-internal-plugin-tool-output-budget",
+ "lash-internal-sansio",
+ "lash-internal-tools",
  "serde",
 ]
 
 [[package]]
-name = "lash-subagents"
+name = "lash-internal-subagents"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-protocol-rlm",
- "lash-rlm-types",
- "lash-sansio",
- "lash-tool-support",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-protocol-rlm",
+ "lash-internal-rlm-types",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
  "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "lash-tool-support"
+name = "lash-internal-tool-support"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
- "lash-core",
- "lash-lashlang-runtime",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
  "serde",
  "serde_json",
  "serde_path_to_error",
 ]
 
 [[package]]
-name = "lash-tools"
+name = "lash-internal-tools"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "async-trait",
- "lash-core",
- "lash-lashlang-runtime",
- "lash-sansio",
- "lash-tool-support",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
  "libc",
  "portable-pty",
  "reqwest",
@@ -2614,17 +2584,85 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-trace"
+name = "lash-internal-trace"
 version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
 dependencies = [
  "chrono",
- "lash-sansio",
+ "lash-internal-sansio",
  "serde",
  "serde_json",
  "sha2",
  "thiserror 2.0.19",
  "uuid",
+]
+
+[[package]]
+name = "lash-internal-typescript"
+version = "0.0.0-dev"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
+dependencies = [
+ "lash-internal-lashlang",
+ "ryu-js",
+ "serde_json",
+ "swc_common",
+ "swc_ecma_ast",
+ "swc_ecma_parser",
+]
+
+[[package]]
+name = "lash-regress"
+version = "0.0.0-dev"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
+dependencies = [
+ "hashbrown 0.16.1",
+ "memchr",
+]
+
+[[package]]
+name = "lash-runtime"
+version = "0.0.0-dev"
+source = "git+https://github.com/Ascending-AI/lash.git?rev=8dac97fa5#8dac97fa5dab0aeae14733ff3ddd860e53cabad1"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "lash-internal-core",
+ "lash-internal-lashlang",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-plugin-tool-output-budget",
+ "lash-internal-protocol-rlm",
+ "lash-internal-protocol-standard",
+ "lash-internal-remote-protocol",
+ "lash-internal-rlm-types",
+ "lash-internal-sansio",
+ "lash-internal-tool-support",
+ "lash-internal-trace",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-search-tools"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "fff-search",
+ "lash-internal-core",
+ "lash-internal-lashlang-runtime",
+ "lash-internal-tool-support",
+ "lash-runtime",
+ "regex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2644,43 +2682,6 @@ dependencies = [
  "lash-runtime",
  "lash-tui",
  "serde_json",
-]
-
-[[package]]
-name = "lash-typescript"
-version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
-dependencies = [
- "lashlang",
- "ryu-js",
- "serde_json",
- "swc_common",
- "swc_ecma_ast",
- "swc_ecma_parser",
-]
-
-[[package]]
-name = "lashlang"
-version = "0.0.0-dev"
-source = "git+https://github.com/Ascending-AI/lash.git?rev=372a95fe9#372a95fe9bad48cfc40bb48b6c4be869dfe076ab"
-dependencies = [
- "async-trait",
- "compact_str 0.9.1",
- "futures-executor",
- "lash-core",
- "lash-regress",
- "lash-sansio",
- "num-bigint",
- "num-traits",
- "rmp-serde",
- "rustc-hash 2.1.3",
- "ryu-js",
- "serde",
- "serde_json",
- "sha2",
- "smallvec",
- "thiserror 2.0.19",
- "url",
 ]
 
 [[package]]
@@ -3038,7 +3039,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3298,7 +3299,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3633,7 +3634,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4005,7 +4006,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4064,7 +4065,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4476,7 +4477,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4724,7 +4725,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5606,7 +5607,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

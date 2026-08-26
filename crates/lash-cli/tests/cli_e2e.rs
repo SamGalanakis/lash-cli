@@ -433,7 +433,7 @@ fn cli_rlm_typescript_status_and_resume_conflict_are_pinned() {
 }
 
 #[test]
-fn cli_rlm_typescript_catalog_sync_failure_is_reported_at_most_once() {
+fn cli_rlm_typescript_post_turn_catalog_sync_succeeds() {
     let lash_home = test_lash_home("rlm-typescript-smoke");
     let mut harness = start_interactive_harness_with_dialect(
         &lash_home,
@@ -471,14 +471,13 @@ fn cli_rlm_typescript_catalog_sync_failure_is_reported_at_most_once() {
             op["op"] == "system_message"
                 && op["text"]
                     .as_str()
-                    .is_some_and(|text| text.to_ascii_lowercase().contains("tool catalog"))
+                    .is_some_and(|text| text.contains("Tool catalog could not be refreshed"))
         })
         .count();
-    // lash-cli issue #9: tighten this assertion to zero once the Lash pin includes the
-    // upstream dialect-preservation fix.
-    assert!(
-        catalog_sync_notices <= 1,
-        "catalog-sync failure notice rendered {catalog_sync_notices} times\ntrace: {}\nscreen:\n{}",
+    assert_eq!(
+        catalog_sync_notices,
+        0,
+        "post-turn catalog sync failed {catalog_sync_notices} times\ntrace: {}\nscreen:\n{}",
         run.artifacts.ui_trace_json.display(),
         run.screen_text
     );

@@ -10,12 +10,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
-use lash::persistence::{
-    ChronologicalEntry, SessionMeta, SessionReadView, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory,
-};
+use lash::persistence::{ChronologicalEntry, SessionReadView, SessionRelation};
 use lash::preflight::{PreflightOptions, PreflightOutcome, probe_store};
-use lash::runtime::SessionPolicy;
 use lash_sqlite_store::{SqliteSessionStoreFactory, SqliteStorePreflight};
 
 pub mod html;
@@ -50,7 +46,7 @@ impl ExportFormat {
 
 /// A loaded session ready to be rendered.
 pub struct LoadedSession {
-    pub meta: Option<SessionMeta>,
+    pub meta: Option<LoadedSessionMetadata>,
     pub chronological: Vec<ChronologicalEntry>,
     pub trace_path: PathBuf,
     /// Derived from the current persisted session-head policy.
@@ -59,6 +55,18 @@ pub struct LoadedSession {
     /// One snapshot per `llm_call_started` event found in the required
     /// provider trace, in trace order.
     pub llm_prompts: Vec<LlmPromptSnapshot>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LoadedSessionMetadata {
+    pub session_id: String,
+    pub relation: SessionRelation,
+}
+
+impl LoadedSessionMetadata {
+    pub fn parent_session_id(&self) -> Option<&str> {
+        self.relation.parent_session_id()
+    }
 }
 
 /// One SQLite schema stamp that refuses the current Lash build.
@@ -82,7 +90,6 @@ pub enum LoadSessionError {
         message: String,
     },
     Preflight(lash::persistence::StoreError),
-    OpenStore(String),
     SessionNotFound(String),
     Store(lash::persistence::StoreError),
     Trace(anyhow::Error),
@@ -94,7 +101,6 @@ impl fmt::Display for LoadSessionError {
             Self::IncompatibleStore { message, .. } => f.write_str(message),
             Self::PreflightUndecided { message, .. } => f.write_str(message),
             Self::Preflight(error) => write!(f, "preflighting session store: {error}"),
-            Self::OpenStore(error) => write!(f, "opening existing session store: {error}"),
             Self::SessionNotFound(session_id) => {
                 write!(f, "session `{session_id}` was not found in the store")
             }
@@ -111,7 +117,6 @@ impl Error for LoadSessionError {
             Self::Trace(error) => Some(error.as_ref()),
             Self::IncompatibleStore { .. }
             | Self::PreflightUndecided { .. }
-            | Self::OpenStore(_)
             | Self::SessionNotFound(_) => None,
         }
     }
@@ -125,7 +130,14 @@ pub async fn load_session_from_paths(
 ) -> std::result::Result<LoadedSession, LoadSessionError> {
     preflight_store(store_root).await?;
     let read_view = open_session_read_only(store_root, session_id).await?;
-    let mut loaded = load_session(&read_view, session_id, None)?;
+    let meta = read_view
+        .durable_relation()
+        .cloned()
+        .map(|relation| LoadedSessionMetadata {
+            session_id: session_id.to_string(),
+            relation,
+        });
+    let mut loaded = load_session(&read_view, session_id, meta)?;
     loaded.trace_path = trace_path.to_path_buf();
     loaded.llm_prompts =
         trace::load_prompts_from_trace(trace_path).map_err(LoadSessionError::Trace)?;
@@ -190,34 +202,10 @@ pub(crate) async fn open_session_read_only(
         .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.to_string()))
 }
 
-/// Open the mutable persistence seam only for relation metadata that the
-/// read-only `SessionReadView` and catalog summary do not expose.
-pub(crate) async fn open_session_metadata(
-    store_root: &Path,
-    session_id: &str,
-) -> std::result::Result<SessionMeta, LoadSessionError> {
-    let factory = SqliteSessionStoreFactory::new(store_root);
-    let request = SessionStoreCreateRequest {
-        session_id: session_id.to_string(),
-        relation: SessionRelation::Root,
-        policy: SessionPolicy::new(lash::TurnBudget::Unbounded),
-    };
-    let store = factory
-        .open_existing_store(&request)
-        .await
-        .map_err(LoadSessionError::OpenStore)?
-        .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.to_string()))?;
-    store
-        .load_session_meta()
-        .await
-        .map_err(LoadSessionError::Store)?
-        .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.to_string()))
-}
-
 pub(crate) fn load_session(
     read_view: &SessionReadView,
     session_id: &str,
-    meta: Option<SessionMeta>,
+    meta: Option<LoadedSessionMetadata>,
 ) -> std::result::Result<LoadedSession, LoadSessionError> {
     if read_view.session_id() != session_id {
         return Err(LoadSessionError::SessionNotFound(session_id.to_string()));
@@ -315,7 +303,6 @@ mod tests {
             .complete(|_request| async move {
                 let text = "runtime fixture answer".to_string();
                 Ok(LlmResponse {
-                    full_text: text.clone(),
                     parts: vec![LlmOutputPart::Text {
                         text,
                         response_meta: None,
@@ -454,9 +441,10 @@ mod tests {
                 assert_eq!(stamps.len(), 1);
                 assert_eq!(stamps[0].database, "durable core");
                 assert_eq!(stamps[0].found, 11);
-                assert_eq!(stamps[0].expected, 41);
+                let expected_schema = i64::from(lash_sqlite_store::SESSION_SCHEMA_VERSION);
+                assert_eq!(stamps[0].expected, expected_schema);
                 assert!(message.contains("11"));
-                assert!(message.contains("41"));
+                assert!(message.contains(&expected_schema.to_string()));
             }
             other => panic!("expected typed schema refusal, got {other}"),
         }

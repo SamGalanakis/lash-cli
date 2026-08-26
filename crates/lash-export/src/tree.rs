@@ -13,16 +13,16 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use lash::persistence::{ChronologicalEntry, SessionMeta, SessionRelation};
+use lash::persistence::{ChronologicalEntry, SessionRelation};
 
 use crate::trace::{LlmPromptSnapshot, load_prompts_from_trace};
 use crate::{
-    LoadSessionError, load_session, open_session_metadata, open_session_read_only, preflight_store,
+    LoadSessionError, LoadedSessionMetadata, load_session, open_session_read_only, preflight_store,
 };
 
 /// One session in the tree, ready to render.
 pub struct LoadedSessionNode {
-    pub meta: SessionMeta,
+    pub meta: LoadedSessionMetadata,
     pub chronological: Vec<ChronologicalEntry>,
     pub model_id: Option<String>,
     pub context_window_tokens: Option<u64>,
@@ -65,7 +65,7 @@ pub struct LoadedSessionTree {
 
 struct CandidateLoad {
     db_path: PathBuf,
-    meta: SessionMeta,
+    meta: LoadedSessionMetadata,
     chronological: Vec<ChronologicalEntry>,
     model_id: Option<String>,
     context_window_tokens: Option<u64>,
@@ -143,8 +143,14 @@ pub async fn load_tree_from_paths(
     .map_err(LoadSessionError::Store)?;
     for summary in summaries {
         let session_id = summary.session_id;
+        let relation = summary
+            .durable_relation
+            .ok_or_else(|| LoadSessionError::SessionNotFound(session_id.clone()))?;
         let read_view = open_session_read_only(store_root, &session_id).await?;
-        let meta = open_session_metadata(store_root, &session_id).await?;
+        let meta = LoadedSessionMetadata {
+            session_id: session_id.clone(),
+            relation,
+        };
         let loaded = load_session(&read_view, &session_id, Some(meta.clone()))?;
         candidates.push(CandidateLoad {
             db_path: store_root.join("durable-core.db"),
@@ -222,7 +228,7 @@ pub async fn load_tree_from_paths(
                     },
                 );
             }
-            SessionRelation::Fork { .. } | SessionRelation::ObserverIntent { .. } => {}
+            SessionRelation::Fork { .. } => {}
         }
     }
 
@@ -302,9 +308,9 @@ pub async fn load_tree_from_paths(
     })
 }
 
-fn tool_call_id_from_cause(caused_by: &Option<lash_core::CausalRef>) -> Option<String> {
+fn tool_call_id_from_cause(caused_by: &Option<lash::process::CausalRef>) -> Option<String> {
     match caused_by {
-        Some(lash_core::CausalRef::ToolCall { call_id, .. }) => Some(call_id.clone()),
+        Some(lash::process::CausalRef::ToolCall { call_id, .. }) => Some(call_id.clone()),
         _ => None,
     }
 }

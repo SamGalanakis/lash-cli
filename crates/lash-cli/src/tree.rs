@@ -1,6 +1,6 @@
 use lash::LashSession;
 use lash::messages::{Message, MessageRole};
-use lash_core::facade_support::SessionNodeRecordFacadeOps;
+use lash::persistence::SessionNodeProjection;
 use std::collections::{HashMap, HashSet};
 
 use crate::app::{App, timeline_from_read_view};

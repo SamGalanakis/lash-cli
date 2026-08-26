@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+use lash::messages::{Message, MessageRole, Part, PartKind};
 use lash::persistence::ChronologicalPayload;
-use lash_core::session_model::{Message, MessageRole, Part, PartKind, PruneState};
+use lash_core::session_model::PruneState;
 
 use super::escaping::{escape, escape_attr, json_highlight};
 use super::prompt::{

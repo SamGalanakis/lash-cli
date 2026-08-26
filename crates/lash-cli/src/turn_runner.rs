@@ -3,10 +3,10 @@ use lash::LashSession;
 use lash::TurnExecutionMetrics;
 use lash::TurnInput;
 use lash::persistence::RuntimeSessionState;
+use lash::runtime::OutputState;
 use lash::turn::AssistantOutput;
 use lash::turn::TurnIssue;
 use lash::usage::TokenUsage;
-use lash_core::facade_support::OutputState;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -250,13 +250,13 @@ mod tests {
             ))
             .provider(provider)
             .model(
-                lash_core::ModelSpec::builder("queued-cancel-test")
+                lash::ModelSpec::builder("queued-cancel-test")
                     .context_window_tokens(16_384)
                     .build()
                     .expect("test model"),
             )
             .store_factory(Arc::new(
-                lash_core::facade_support::InMemorySessionStoreFactory::new(),
+                lash::persistence::InMemorySessionStoreFactory::new(),
             ))
             .disable_queued_work_driver()
             .build(lash::persistence::LeaseOwnerIdentity::opaque(

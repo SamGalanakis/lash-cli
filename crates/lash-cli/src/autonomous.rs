@@ -91,9 +91,9 @@ impl AutonomousRenderer {
                 ..
             } => {
                 let status = match output.outcome {
-                    lash_core::ToolCallOutcome::Success(_) => ToolStatus::Success,
-                    lash_core::ToolCallOutcome::Failure(_) => ToolStatus::Failure,
-                    lash_core::ToolCallOutcome::Cancelled(_) => ToolStatus::Cancelled,
+                    lash::tools::ToolCallOutcome::Success(_) => ToolStatus::Success,
+                    lash::tools::ToolCallOutcome::Failure(_) => ToolStatus::Failure,
+                    lash::tools::ToolCallOutcome::Cancelled(_) => ToolStatus::Cancelled,
                 };
                 eprintln!("{}", format_tool_line(&name, status, duration_ms));
             }

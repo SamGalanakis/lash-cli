@@ -29,10 +29,11 @@ mod tests {
     use super::*;
     use crate::LoadedSession;
     use crate::trace::{LlmCallUsage, LlmPromptSnapshot, RequestMessage};
+    use lash::messages::{Message, MessageRole, Part};
     use lash::persistence::{ChronologicalEntry, ChronologicalPayload};
-    use lash_core::session_model::{Part, shared_parts};
     use lash_rlm_types::RlmTrajectoryEntry;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn prompt_snapshot(protocol_iteration: u64, text: &str) -> LlmPromptSnapshot {
         LlmPromptSnapshot {
@@ -60,20 +61,20 @@ mod tests {
         }
     }
 
-    fn user_message(id: &str, text: &str) -> lash_core::session_model::Message {
-        lash_core::session_model::Message {
+    fn user_message(id: &str, text: &str) -> Message {
+        Message {
             id: id.to_string(),
-            role: lash_core::session_model::MessageRole::User,
-            parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
+            role: MessageRole::User,
+            parts: Arc::new(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
             origin: None,
         }
     }
 
-    fn assistant_message(id: &str, text: &str) -> lash_core::session_model::Message {
-        lash_core::session_model::Message {
+    fn assistant_message(id: &str, text: &str) -> Message {
+        Message {
             id: id.to_string(),
-            role: lash_core::session_model::MessageRole::Assistant,
-            parts: shared_parts(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
+            role: MessageRole::Assistant,
+            parts: Arc::new(vec![Part::text(format!("{id}.p0"), text.to_string(), None)]),
             origin: None,
         }
     }
@@ -181,10 +182,10 @@ mod tests {
             "lookup".to_string(),
             None,
         );
-        let assistant_msg = lash_core::session_model::Message {
+        let assistant_msg = Message {
             id: "m0".to_string(),
-            role: lash_core::session_model::MessageRole::Assistant,
-            parts: shared_parts(vec![tool_part]),
+            role: MessageRole::Assistant,
+            parts: Arc::new(vec![tool_part]),
             origin: None,
         };
         let session = LoadedSession {

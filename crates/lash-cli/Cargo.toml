@@ -25,7 +25,6 @@ name = "lash"
 path = "src/main.rs"
 
 [dependencies]
-lash-core = { workspace = true }
 lash = { workspace = true, features = ["rlm"] }
 lash-plugin-mcp = { workspace = true, features = ["lashlang"] }
 lash-plugin-process-controls = { workspace = true, features = ["lashlang"] }

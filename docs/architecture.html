@@ -64,7 +64,7 @@ LashCore::{standard,rlm}_builder
        ┌──────┴────────┐
        ▼               ▼
 interactive TUI   --print / JSON / RPC</code></pre>
-      <p>Execution modes such as <code>standard</code> and <code>rlm</code> are Lash protocol plugins. The CLI chooses and configures one for a session; it does not implement protocol semantics itself. Every session lives in one Lash catalog under <code>~/.lash/store/</code>; listing, resume, startup, and tree discovery take durable identity from that catalog, while the CLI host roster supplies display metadata only. Catalog-only sessions remain addressable with fallback labels. Store preflight runs before provider or session startup, and shutdown flushes the trace sink before closing each core. This pin reads session schema <code>41</code>, trace schema <code>9</code>, and remote protocol <code>46</code>.</p>
+      <p>Execution modes such as <code>standard</code> and <code>rlm</code> are Lash protocol plugins. The CLI chooses and configures one for a session; it does not implement protocol semantics itself. Every session lives in one Lash catalog under <code>~/.lash/store/</code>; listing, resume, startup, and tree discovery take durable identity from that catalog, while the CLI host roster supplies display metadata only. Catalog-only sessions remain addressable with fallback labels. Store preflight runs before provider or session startup, and shutdown flushes the trace sink before closing each core. This pin reads session schema <code>44</code>, trace schema <code>10</code>, and remote protocol <code>47</code>.</p>
     </section>
     <section class="section">
       <div class="section-header"><h2>Dependency rule</h2></div>

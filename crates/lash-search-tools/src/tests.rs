@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::ToolProvider;
+    use lash::tools::ToolProvider;
     use serde_json::json;
     use tempfile::TempDir;
 

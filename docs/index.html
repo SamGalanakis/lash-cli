@@ -311,7 +311,7 @@ $ lash --print "Investigate the latest test failure." \
           <div class="section-header">
             <h2>Resume &amp; Fork</h2>
             <p>Every session has a UUID and normally a generated human-readable name. <code>--resume &lt;id_or_name&gt;</code> accepts either; legacy <code>.db</code> filenames are refused as incompatible. Without an argument, <code>/resume</code> opens an interactive picker showing the 50 most recent live root sessions from Lash's unified catalog, sorted by recency. The host roster contributes display metadata only, so catalog-only sessions remain visible with fallback labels. The picker hides zero-turn sessions when any non-empty session exists; direct <code>/resume &lt;id-or-name&gt;</code> may still target any session.</p>
-            <p>The current durable compatibility markers are session schema <code>41</code>, trace schema <code>9</code>, and remote protocol <code>46</code>. <code>lash --version</code> and <code>/info</code> report them.</p>
+            <p>The current durable compatibility markers are session schema <code>44</code>, trace schema <code>10</code>, and remote protocol <code>47</code>. <code>lash --version</code> and <code>/info</code> report them.</p>
           </div>
           <p><code>/fork</code> branches the current session at the current message and opens the fork in a new terminal window. Lash resolves the launcher from the running executable and falls back to finding <code>lash</code> on <code>$PATH</code> if that binary isn't launchable. The launched fork runs <code>lash --resume &lt;new-session-id&gt;</code> in the new terminal.</p>
         </div>

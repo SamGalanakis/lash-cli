@@ -340,17 +340,17 @@ impl ActivityState {
     ) -> Vec<ActivityBlock> {
         let name = activity_tool_name(name);
         let result = match &output.outcome {
-            lash_core::ToolCallOutcome::Failure(failure) => failure
+            lash::tools::ToolCallOutcome::Failure(failure) => failure
                 .raw
                 .as_ref()
                 .map(lash::tools::ToolValue::to_json_value)
                 .unwrap_or_else(|| output.value_for_projection()),
-            lash_core::ToolCallOutcome::Cancelled(cancellation) => cancellation
+            lash::tools::ToolCallOutcome::Cancelled(cancellation) => cancellation
                 .raw
                 .as_ref()
                 .map(lash::tools::ToolValue::to_json_value)
                 .unwrap_or_else(|| output.value_for_projection()),
-            lash_core::ToolCallOutcome::Success(_) => output.value_for_projection(),
+            lash::tools::ToolCallOutcome::Success(_) => output.value_for_projection(),
         };
         let success = output.is_success();
         if name == "batch" {
@@ -360,9 +360,9 @@ impl ActivityState {
             return Vec::new();
         }
         let status = match &output.outcome {
-            lash_core::ToolCallOutcome::Success(_) => ActivityStatus::Completed,
-            lash_core::ToolCallOutcome::Failure(_) => ActivityStatus::Failed,
-            lash_core::ToolCallOutcome::Cancelled(_) => ActivityStatus::Cancelled,
+            lash::tools::ToolCallOutcome::Success(_) => ActivityStatus::Completed,
+            lash::tools::ToolCallOutcome::Failure(_) => ActivityStatus::Failed,
+            lash::tools::ToolCallOutcome::Cancelled(_) => ActivityStatus::Cancelled,
         };
         let mut ctx = ProjectCtx {
             name,

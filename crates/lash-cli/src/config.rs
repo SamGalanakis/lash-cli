@@ -574,7 +574,6 @@ fn rlm_typescript_smoke_provider() -> lash::testing::TestProvider {
             };
             let response = format!("<typescript>\nfinish(\"{result}\");\n</typescript>");
             Ok(lash::provider::LlmResponse {
-                full_text: response.clone(),
                 parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response,
                     response_meta: None,
@@ -603,7 +602,6 @@ fn standard_echo_provider() -> lash::testing::TestProvider {
             };
             let response = format!("test-provider echo: {prompt}");
             Ok(lash::provider::LlmResponse {
-                full_text: response.clone(),
                 parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response,
                     response_meta: None,
@@ -634,7 +632,6 @@ fn standard_slow_echo_provider() -> lash::testing::TestProvider {
                 "test-provider echo: interactive prompt"
             };
             Ok(lash::provider::LlmResponse {
-                full_text: response.to_string(),
                 parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
@@ -666,7 +663,6 @@ fn standard_gated_escape_provider() -> lash::testing::TestProvider {
                 "test-provider echo: interactive prompt"
             };
             Ok(lash::provider::LlmResponse {
-                full_text: response.to_string(),
                 parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
@@ -702,7 +698,6 @@ finish result.value
 </lashlang>"#
             };
             Ok(lash::provider::LlmResponse {
-                full_text: response.to_string(),
                 parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
@@ -733,7 +728,6 @@ if write.exit_code == 0 {
 }
 </lashlang>"#;
             Ok(lash::provider::LlmResponse {
-                full_text: response.to_string(),
                 parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,
@@ -759,7 +753,6 @@ result = await shell.exec({ cmd: "sh -c 'echo qc-nonzero-stderr >&2; exit 7'" })
 finish format("nonzero-smoke-ok exit={}", result.exit_code)
 </lashlang>"#;
             Ok(lash::provider::LlmResponse {
-                full_text: response.to_string(),
                 parts: vec![lash::direct::LlmOutputPart::Text {
                     text: response.to_string(),
                     response_meta: None,

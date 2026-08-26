@@ -28,8 +28,8 @@ pub fn render(session: &LoadedSession) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash::messages::{Message, MessageRole, Part};
     use lash::persistence::{ChronologicalEntry, ChronologicalPayload};
-    use lash_core::{Message, MessageRole};
     use std::path::PathBuf;
 
     #[test]
@@ -41,7 +41,7 @@ mod tests {
                 payload: ChronologicalPayload::Message(Message {
                     id: "m1".to_string(),
                     role: MessageRole::User,
-                    parts: std::sync::Arc::new(vec![lash_core::Part::text(
+                    parts: std::sync::Arc::new(vec![Part::text(
                         "p1".to_string(),
                         "hello".to_string(),
                         None,

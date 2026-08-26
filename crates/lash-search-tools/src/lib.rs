@@ -16,7 +16,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use lash_core::{ToolCall, ToolDefinition, ToolFailureClass, ToolOutcome, ToolRetryPolicy};
+use lash::tools::{ToolCall, ToolDefinition, ToolFailureClass, ToolOutcome, ToolRetryPolicy};
 
 use lash_tool_support::{
     StaticToolExecute, StaticToolProvider, ToolDefinitionBindingExt, execution_failure,
@@ -1197,13 +1197,13 @@ fn timeout_grep_result(query: &str, stage: &str, budget: Duration, message: &str
         },
         extra,
     ));
-    let mut failure = lash_core::ToolFailure::safe_retry(
+    let mut failure = lash::tools::ToolFailure::safe_retry(
         ToolFailureClass::Timeout,
         "grep_timeout",
         message,
         Some(50),
     );
-    failure.raw = Some(lash_core::ToolValue::untrusted_json(raw));
+    failure.raw = Some(lash::tools::ToolValue::untrusted_json(raw));
     ToolOutcome::failure(failure)
 }
 

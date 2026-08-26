@@ -574,7 +574,7 @@ mod tests {
         })];
         factories.extend(lash::testing::test_code_protocol_factories());
         let host = PluginHost::new(factories);
-        let session = host.build_session("root", None).expect("session");
+        let session = host.build_session("root").expect("session");
 
         let members = |session: &Arc<lash::plugins::PluginSession>| {
             session

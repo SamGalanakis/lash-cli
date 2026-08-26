@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
+use lash::messages::{Message, MessageRole, PartKind};
+use lash::persistence::ProtocolEvent;
 use lash::persistence::{ChronologicalEntry, ChronologicalPayload, ChronologicalProjection};
-use lash_core::session_model::{Message, MessageRole, PartKind, ProtocolEvent};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LashlangTranscriptStep {
@@ -230,7 +231,7 @@ pub fn format_tokens(n: i64) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use lash_core::session_model::Part;
+    use lash::messages::Part;
 
     use super::*;
 

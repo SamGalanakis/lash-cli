@@ -1,5 +1,5 @@
 //! MCP catalog projection.
-use lash_core::CompactToolContract;
+use lash::tools::CompactToolContract;
 use serde_json::{Value, json};
 
 use super::common::round_score;

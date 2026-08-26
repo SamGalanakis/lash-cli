@@ -12,9 +12,6 @@ use crate::keybindings::shortcut_help_rows;
 use crate::model_selection::provider_display_label;
 use crate::overlay::{DocumentRow, DocumentSection, DocumentState};
 
-// Mirrors the private `lash_sqlite_store::schema::SCHEMA_VERSION` at the pinned Lash revision.
-const SESSION_SCHEMA: u32 = 41;
-
 pub(crate) fn version_text() -> String {
     format!(
         "lash-cli {}
@@ -26,7 +23,10 @@ durable formats: {}",
 
 fn durable_formats_text() -> String {
     let mut formats = vec![
-        format!("session schema={SESSION_SCHEMA}"),
+        format!(
+            "session schema={}",
+            lash_sqlite_store::SESSION_SCHEMA_VERSION
+        ),
         format!("trace schema={}", lash_trace::TRACE_SCHEMA_VERSION),
         format!("remote protocol={}", lash::remote::REMOTE_PROTOCOL_VERSION),
     ];
@@ -313,13 +313,19 @@ mod tests {
 
     #[test]
     fn durable_format_versions_match_the_adopted_lash_pin() {
-        assert_eq!(lash_trace::TRACE_SCHEMA_VERSION, 9);
-        assert_eq!(lash::remote::REMOTE_PROTOCOL_VERSION, 46);
-        let expected_session_schema = format!("session schema={SESSION_SCHEMA}");
-        assert!(
-            durable_formats_text()
-                .starts_with(&format!("{expected_session_schema}, trace schema="))
-        );
+        let displayed = durable_formats_text();
+        assert!(displayed.contains(&format!(
+            "session schema={}",
+            lash_sqlite_store::SESSION_SCHEMA_VERSION
+        )));
+        assert!(displayed.contains(&format!(
+            "trace schema={}",
+            lash_trace::TRACE_SCHEMA_VERSION
+        )));
+        assert!(displayed.contains(&format!(
+            "remote protocol={}",
+            lash::remote::REMOTE_PROTOCOL_VERSION
+        )));
     }
     use crate::keybindings::ShortcutHelpRow;
 

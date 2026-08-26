@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write as _;
 
+use lash::messages::MessageRole;
 use lash::persistence::{ChronologicalEntry, ChronologicalPayload};
-use lash_core::session_model::MessageRole;
 
 use crate::trace::LlmPromptSnapshot;
 use crate::transcript::{format_count, format_tokens, lashlang_transcript_step_from_event};
