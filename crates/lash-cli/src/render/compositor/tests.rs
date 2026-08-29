@@ -381,11 +381,14 @@ mod tests {
             Arc::new(TuiExtensions::new(vec![chrome_ext]).expect("chrome extension"));
         app.set_ui_extensions(ui_extensions);
         app.set_chrome_state(chrome_state);
-        app.update_processes(vec![lash::process::ProcessHandleView::new(
-            "process-1",
-            lash::process::ProcessIdentity::new("lashlang").with_label(Some("responder")),
-            lash::process::ProcessStatus::Running,
-        )]);
+        app.update_processes(vec![crate::app::ProcessSnapshot {
+            view: lash::process::ProcessHandleView::new(
+                "process-1",
+                lash::process::ProcessIdentity::new("lashlang").with_label(Some("responder")),
+                lash::process::ProcessStatus::Running,
+            ),
+            updated_at_ms: None,
+        }]);
         sync_chrome_turn_status(&app);
 
         let snapshot = lash_tui::render_snapshot(80, 10, |frame| draw(frame, &mut app));
@@ -421,8 +424,8 @@ mod tests {
     #[test]
     fn process_dock_renders_below_input_and_overview_as_overlay() {
         let mut app = App::new("gpt-5.4".into(), "test".into(), "test-session-id".into());
-        app.update_processes(vec![
-            lash::process::ProcessHandleView::new(
+        app.update_processes(vec![crate::app::ProcessSnapshot {
+            view: lash::process::ProcessHandleView::new(
                 "process-1",
                 lash::process::ProcessIdentity::new("lashlang")
                     .with_label(Some("responder"))
@@ -437,7 +440,8 @@ mod tests {
                     )),
                 lash::process::ProcessStatus::Running,
             ),
-        ]);
+            updated_at_ms: None,
+        }]);
         app.select_next_process();
 
         let areas = render::chrome_areas(&app, 80, 16);

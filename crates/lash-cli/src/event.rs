@@ -1,7 +1,6 @@
 use crossterm::event::Event as TermEvent;
 use lash::TurnActivity;
 use lash::observe::SessionProcessEventKind;
-use lash::process::ProcessHandleView;
 use lash_tui_extensions::TuiHostEffect;
 use tokio::sync::mpsc;
 
@@ -60,7 +59,7 @@ pub enum AppEvent {
 
 pub struct UiSnapshotResult {
     pub effects: Vec<TuiHostEffect>,
-    pub processes: Option<Vec<ProcessHandleView>>,
+    pub processes: Option<Vec<crate::app::ProcessSnapshot>>,
     pub duration: std::time::Duration,
     pub timed_out: bool,
     pub diagnostics: Vec<String>,

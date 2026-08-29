@@ -167,7 +167,7 @@ pub(super) async fn cancel_selected_process(app: &mut App, runtime: &Option<Lash
                 Ok(processes) => app.update_processes(
                     processes
                         .into_iter()
-                        .map(crate::ui_effects::observed_to_handle_summary)
+                        .map(crate::ui_effects::observed_to_process_snapshot)
                         .collect(),
                 ),
                 Err(err) => {
