@@ -43,6 +43,19 @@ pub(crate) use self::projection::{
 };
 pub(crate) use self::queues::turn_input_display_text;
 
+const PROCESS_RETENTION: std::time::Duration = std::time::Duration::from_secs(10);
+
+pub(crate) struct ProcessSnapshot {
+    pub view: ProcessHandleView,
+    pub updated_at_ms: Option<u64>,
+}
+
+fn process_updated_within_retention(updated_at_ms: u64, now_ms: u64) -> bool {
+    now_ms
+        .checked_sub(updated_at_ms)
+        .is_some_and(|age_ms| age_ms <= PROCESS_RETENTION.as_millis() as u64)
+}
+
 fn user_turn_start_indices(blocks: &[UiTimelineItem]) -> Vec<usize> {
     blocks
         .iter()
@@ -816,6 +829,14 @@ impl App {
         let before_tasks = self.processes.len();
         self.processes.retain(ProcessView::is_visible);
         if self.processes.len() != before_tasks {
+            if self.selected_process_id.as_deref().is_some_and(|selected| {
+                !self
+                    .processes
+                    .iter()
+                    .any(|process| process.process_id == selected)
+            }) {
+                self.selected_process_id = None;
+            }
             self.invalidate_height_cache();
             self.dirty = true;
         }
@@ -1046,8 +1067,11 @@ impl App {
         self.dirty = true;
     }
 
-    pub fn update_processes(&mut self, tasks: Vec<ProcessHandleView>) {
+    pub fn update_processes(&mut self, snapshots: Vec<ProcessSnapshot>) {
         let now = std::time::Instant::now();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis() as u64);
         let previous: HashMap<String, ProcessView> = self
             .processes
             .iter()
@@ -1055,29 +1079,33 @@ impl App {
             .map(|task| (task.process_id.clone(), task))
             .collect();
         let mut next = Vec::new();
-        for task in tasks {
-            let old_status = previous
-                .get(&task.process_id)
-                .and_then(|item| item.status.is_terminal().then_some(item.status));
+        for snapshot in snapshots {
+            let ProcessSnapshot {
+                view: task,
+                updated_at_ms,
+            } = snapshot;
+            let previous_process = previous.get(&task.process_id);
             let status = task.status.is_terminal().then_some(task.status);
-            let first_seen = previous
-                .get(&task.process_id)
-                .map(|item| item.first_seen)
-                .unwrap_or(now);
+            let first_seen = previous_process.map(|item| item.first_seen).unwrap_or(now);
             let status_duration = if status.is_some() {
-                previous
-                    .get(&task.process_id)
+                previous_process
                     .and_then(|item| item.status_duration)
                     .or_else(|| Some(first_seen.elapsed()))
             } else {
                 None
             };
-            let transient_until = if status.is_some() && old_status != status {
-                Some(now + std::time::Duration::from_secs(10))
+            let transient_until = if status.is_none() {
+                None
+            } else if previous_process.is_some_and(|item| !item.status.is_terminal()) {
+                Some(now + PROCESS_RETENTION)
+            } else if let Some(previous_process) = previous_process {
+                previous_process.transient_until
+            } else if updated_at_ms.is_some_and(|updated_at_ms| {
+                process_updated_within_retention(updated_at_ms, now_ms)
+            }) {
+                Some(now + PROCESS_RETENTION)
             } else {
-                previous
-                    .get(&task.process_id)
-                    .and_then(|item| item.transient_until)
+                None
             };
             next.push(ProcessView::from_summary(
                 task,
@@ -1212,3 +1240,90 @@ impl App {
 }
 
 pub use lash_export::transcript::format_tokens;
+
+#[cfg(test)]
+mod process_retention_tests {
+    use super::*;
+
+    fn process(
+        process_id: &str,
+        status: ProcessStatus,
+        updated_at_ms: Option<u64>,
+    ) -> ProcessSnapshot {
+        ProcessSnapshot {
+            view: ProcessHandleView::new(
+                process_id,
+                lash::process::ProcessIdentity::new("subagent").with_label(Some("spawn")),
+                status,
+            ),
+            updated_at_ms,
+        }
+    }
+
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("current time follows Unix epoch")
+            .as_millis() as u64
+    }
+
+    #[test]
+    fn running_process_stays_visible_during_terminal_retention_then_prunes() {
+        let mut app = App::new("test-model".into(), "test".into(), "session".into());
+
+        app.update_processes(vec![process("process-1", ProcessStatus::Running, None)]);
+        app.update_processes(vec![process("process-1", ProcessStatus::Completed, None)]);
+
+        assert_eq!(app.processes.len(), 1);
+        assert_eq!(app.processes[0].status, ProcessStatus::Completed);
+        assert!(app.processes[0].transient_until.is_some());
+
+        app.processes[0].transient_until = Some(std::time::Instant::now());
+        app.on_tick();
+
+        assert!(app.processes.is_empty());
+    }
+
+    #[test]
+    fn first_seen_terminal_process_after_initial_snapshot_is_visible_transiently() {
+        let mut app = App::new("test-model".into(), "test".into(), "session".into());
+
+        app.update_processes(Vec::new());
+        app.update_processes(vec![process(
+            "process-1",
+            ProcessStatus::Completed,
+            Some(now_ms()),
+        )]);
+
+        assert_eq!(app.processes.len(), 1);
+        assert!(app.processes[0].transient_until.is_some());
+    }
+
+    #[test]
+    fn first_seen_terminal_process_in_initial_snapshot_is_not_resurrected() {
+        let mut app = App::new("test-model".into(), "test".into(), "session".into());
+
+        app.update_processes(vec![process(
+            "process-1",
+            ProcessStatus::Completed,
+            Some(now_ms() - PROCESS_RETENTION.as_millis() as u64 - 1),
+        )]);
+
+        assert!(app.processes.is_empty());
+    }
+
+    #[test]
+    fn selected_process_clears_when_terminal_row_prunes() {
+        let mut app = App::new("test-model".into(), "test".into(), "session".into());
+
+        app.update_processes(vec![process("process-1", ProcessStatus::Running, None)]);
+        app.update_processes(vec![process("process-1", ProcessStatus::Completed, None)]);
+        assert!(app.select_next_process());
+        app.processes[0].transient_until = Some(std::time::Instant::now());
+
+        app.on_tick();
+
+        assert!(app.processes.is_empty());
+        assert!(app.selected_process_id.is_none());
+    }
+}

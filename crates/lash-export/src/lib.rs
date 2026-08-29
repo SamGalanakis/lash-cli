@@ -322,13 +322,14 @@ mod tests {
                     .expect("valid fixture model"),
             )
             .store_factory(Arc::new(SqliteSessionStoreFactory::new(store_root)))
-            .effect_host(Arc::new(lash::durability::InlineEffectHost::default()))
+            .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .process_env_store(Arc::new(
                 lash::persistence::InMemoryProcessExecutionEnvStore::new(),
             ))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .without_queued_work()
             .trace_jsonl_path(trace_path)
     }
 
@@ -416,8 +417,10 @@ mod tests {
         std::fs::create_dir_all(&store_root).expect("create store root");
         let database_path = store_root.join("durable-core.db");
         let connection = rusqlite::Connection::open(&database_path).expect("open empty database");
+        let expected_schema = i64::from(lash_sqlite_store::SESSION_SCHEMA_VERSION);
+        let previous_schema = expected_schema - 1;
         connection
-            .pragma_update(None, "user_version", 11_i64)
+            .pragma_update(None, "user_version", previous_schema)
             .expect("stamp old schema");
         drop(connection);
 
@@ -440,10 +443,9 @@ mod tests {
                 assert_eq!(refused_root, store_root);
                 assert_eq!(stamps.len(), 1);
                 assert_eq!(stamps[0].database, "durable core");
-                assert_eq!(stamps[0].found, 11);
-                let expected_schema = i64::from(lash_sqlite_store::SESSION_SCHEMA_VERSION);
+                assert_eq!(stamps[0].found, previous_schema);
                 assert_eq!(stamps[0].expected, expected_schema);
-                assert!(message.contains("11"));
+                assert!(message.contains(&previous_schema.to_string()));
                 assert!(message.contains(&expected_schema.to_string()));
             }
             other => panic!("expected typed schema refusal, got {other}"),

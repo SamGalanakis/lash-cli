@@ -235,6 +235,8 @@ impl App {
     /// Process a semantic turn activity, updating display blocks.
     pub fn handle_turn_activity(&mut self, activity: TurnActivity) {
         match activity.event {
+            // Active-turn targeting is owned by `ActiveTurnTargetSink`.
+            TurnEvent::TurnStarted { .. } => {}
             TurnEvent::ReasoningDelta { text } => {
                 self.live.model_output_chunks.push(ModelOutputChunk {
                     correlation_id: activity.correlation_id,

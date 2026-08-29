@@ -292,9 +292,11 @@ impl CliSessionOpener {
             .process_registry(process_registry)
             .trigger_store(trigger_store)
             .trace_level(self.trace_level);
-        if self.owns_visible_queued_turns {
-            builder = builder.disable_queued_work_driver();
-        }
+        builder = if self.owns_visible_queued_turns {
+            builder.without_queued_work()
+        } else {
+            builder.with_native_queued_work()
+        };
         if let Some(trace_path) = self.trace_jsonl_path.clone() {
             builder = builder.trace_jsonl_path(trace_path);
         }

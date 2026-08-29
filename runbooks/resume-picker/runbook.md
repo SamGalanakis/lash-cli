@@ -64,17 +64,21 @@ key enter
 expect 10 Session
 expect 10 id
 screen 40
-key esc
-```
-
-Then roll once more so B becomes a non-current, hidden empty:
-
-```
 wait 2
+key esc
+clear
 type /clear
+expect 6 ❯ /clear
 key enter
 expect 10 Started new session
 ```
+
+The post-`Esc` `clear` drops stale modal frames, then typing `/clear` must repaint the
+editor draft as `❯ /clear`. If `/info` were still open, the typed bytes would not render in
+the editor. This action-driven gate therefore proves dismissal and correct byte routing;
+the subsequent `Started new session` gate proves submission. The explicit wait only spaces
+session-file writes so their timestamp filenames cannot collide. B is now a non-current,
+hidden empty.
 
 State: A non-empty (non-current), B empty (non-current, hideable), C empty (current).
 
@@ -87,26 +91,26 @@ key enter
 expect 10 Resume Session
 screen 22
 key esc
-expect 6 Message · / for commands
+clear
+type /resume <B>
+expect 6 ❯ /resume
+key enter
+expect 10 Resumed: <B>
 ```
 
 Gate: the picker header is `Resume Session (1/1)` and the single row is A's preview —
 `just now  1 hello from pty …`. The empty session B is **absent**, and `No messages yet`
 does **not** appear. A picker that lists B (or shows `No messages yet` here) is a hiding-rule
-violation → Abort/RCA.
+violation → Abort/RCA. After `Esc`, typing the direct-target command must repaint the editor
+draft as `❯ /resume`; if the picker were still open the bytes would instead route to its
+`Search:` field. This action-driven draft-row gate proves picker dismissal and correct byte
+routing without depending on an unchanged idle-placeholder row.
 
 ## Phase 3 — Direct-target escape hatch
 
-Target the hidden empty session B directly by its catalog id (from Phase 1):
-
-```
-clear
-type /resume <B>
-key enter
-expect 10 Resumed: <B>
-```
-
-Gate: `Resumed: <B>` — the picker suppressed B, but the direct form reached it.
+The command typed as the Phase 2 dismissal gate targets the hidden empty session B directly
+by its catalog id (from Phase 1). Gate: `Resumed: <B>` — the picker suppressed B, but the
+direct form reached it.
 
 **Rigor (contract check on the identifier surface).** CONTEXT.md → "Operator UI" and
 `docs/index.html` present `/resume <id-or-name>` as accepting the session **id or
@@ -150,9 +154,9 @@ thing to resume. Then `kill`.
 |------|----------------|---------|-------|
 | Hides empty when non-empty exists | `Resume Session (1/1)`, only `hello from pty`, no `No messages yet` |  |  |
 | Current session excluded | current session absent from the list |  |  |
-| Direct target reaches hidden session | `Resumed: <B>` |  |  |
+| Direct target reaches hidden session | post-picker `❯ /resume` draft-row repaint, then `Resumed: <B>` |  |  |
 | Only-empty shows all | every row `No messages yet` |  |  |
-| Identifier surface (rigor) | `/info` renders `Session`, then separate `name <adjective-noun>` and `id <uuid>` rows |  |  |
+| Identifier surface (rigor) | `/info` renders `Session`, then separate `name <adjective-noun>` and `id <uuid>` rows; post-`Esc` `❯ /clear` proves dismissal |  |  |
 
 **Aggregate:** does the picker hide zero-turn sessions only when a non-empty exists, show
 `No messages yet` when only empties exist, exclude the current session, and does the direct

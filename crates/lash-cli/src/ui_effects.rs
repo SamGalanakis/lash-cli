@@ -217,10 +217,38 @@ fn replay_plugin_operation_receipt(
 /// onto the model/handle row the process dock renders. The dock is keyed on the
 /// grant-entry handle shape, so this is the one boundary that maps the unified
 /// facade vocabulary back to it.
-pub(crate) fn observed_to_handle_summary(
+pub(crate) fn observed_to_process_snapshot(
     process: lash::process::ObservedProcess,
-) -> lash::process::ProcessHandleView {
-    lash::process::ProcessHandleView::new(process.process_id, process.identity, process.lifecycle)
+) -> crate::app::ProcessSnapshot {
+    let lash::process::ObservedProcess {
+        process_id,
+        graph_key: _,
+        kind: _,
+        lifecycle,
+        identity,
+        status_label: _,
+        terminal: _,
+        disposition: _,
+        error: _,
+        created_at_ms: _,
+        updated_at_ms,
+        first_started: _,
+        lease_holder: _,
+        lease_expires_at_ms: _,
+        abandon_request: _,
+        input: _,
+        originator: _,
+        env_ref: _,
+        caused_by: _,
+        external_ref: _,
+        wait: _,
+        child_session_id: _,
+        label: _,
+    } = process;
+    crate::app::ProcessSnapshot {
+        view: lash::process::ProcessHandleView::new(process_id, identity, lifecycle),
+        updated_at_ms: Some(updated_at_ms),
+    }
 }
 
 fn push_plugin_operation_message(app: &mut App, output: &serde_json::Value) {
@@ -234,8 +262,13 @@ pub(crate) async fn collect_ui_snapshot(
 ) -> crate::event::UiSnapshotResult {
     let started = std::time::Instant::now();
     let mut diagnostics = Vec::new();
-    let processes = match session.processes().list().await {
-        Ok(tasks) => Some(tasks.into_iter().map(observed_to_handle_summary).collect()),
+    let processes = match session.processes().list_all().await {
+        Ok(tasks) => Some(
+            tasks
+                .into_iter()
+                .map(observed_to_process_snapshot)
+                .collect(),
+        ),
         Err(err) => {
             diagnostics.push(format!("process snapshot failed: {err}"));
             None
