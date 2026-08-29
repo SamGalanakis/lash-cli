@@ -163,7 +163,7 @@ pub(super) async fn cancel_selected_process(app: &mut App, runtime: &Option<Lash
                     summary.status.label()
                 ),
             );
-            match processes.list().await {
+            match processes.list_all().await {
                 Ok(processes) => app.update_processes(
                     processes
                         .into_iter()
