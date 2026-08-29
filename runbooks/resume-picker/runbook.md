@@ -65,9 +65,12 @@ expect 10 Session
 expect 10 id
 screen 40
 key esc
+clear
 ```
 
-Then roll once more so B becomes a non-current, hidden empty:
+Clear the capture immediately after dismissing `/info` so the next typed command cannot
+race the modal's escape handling. Then roll once more so B becomes a non-current, hidden
+empty:
 
 ```
 wait 2
@@ -87,8 +90,12 @@ key enter
 expect 10 Resume Session
 screen 22
 key esc
+clear
 expect 6 Message · / for commands
 ```
+
+The post-`Esc` `clear` makes the placeholder gate poll only a newly rendered dismissed
+frame before any direct-target bytes are typed.
 
 Gate: the picker header is `Resume Session (1/1)` and the single row is A's preview —
 `just now  1 hello from pty …`. The empty session B is **absent**, and `No messages yet`
