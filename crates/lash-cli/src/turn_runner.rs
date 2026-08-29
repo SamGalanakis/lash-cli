@@ -39,20 +39,28 @@ impl lash::TurnActivitySink for ActiveTurnTargetSink {
     async fn emit(&self, _activity: lash::TurnActivity) {}
 
     async fn emit_for_turn(&self, emitted_turn_id: &str, activity: lash::TurnActivity) {
-        let lash::TurnEvent::TurnStarted { turn_id } = activity.event else {
-            debug_assert!(
-                self.last_turn_id
-                    .lock()
-                    .expect("turn target lock")
-                    .as_deref()
-                    == Some(emitted_turn_id),
-                "Lash must emit TurnStarted before other physical-turn activity"
-            );
-            return;
+        let (turn_id, is_turn_started) = match activity.event {
+            lash::TurnEvent::TurnStarted { turn_id } => {
+                debug_assert_eq!(emitted_turn_id, turn_id);
+                (turn_id, true)
+            }
+            _ => (emitted_turn_id.to_string(), false),
         };
-        debug_assert_eq!(emitted_turn_id, turn_id);
         {
             let mut last_turn_id = self.last_turn_id.lock().expect("turn target lock");
+            if !is_turn_started {
+                if let Some(announced_turn_id) = last_turn_id.as_deref() {
+                    debug_assert_eq!(
+                        announced_turn_id, emitted_turn_id,
+                        "physical-turn activity must match the announced turn"
+                    );
+                } else {
+                    tracing::warn!(
+                        turn_id = emitted_turn_id,
+                        "physical-turn activity arrived before TurnStarted; using emitted turn id"
+                    );
+                }
+            }
             if last_turn_id.as_deref() == Some(turn_id.as_str()) {
                 return;
             }
@@ -584,7 +592,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_turn_target_sink_uses_only_turn_started_and_tracks_successive_turns() {
+    async fn active_turn_target_sink_prefers_turn_started_and_tracks_successive_turns() {
         let mut event_pump = AppEventPump::new();
         let sink = ActiveTurnTargetSink::new(11, Some(event_pump.sender()));
         sink.emit_for_turn(
@@ -594,6 +602,7 @@ mod tests {
             }),
         )
         .await;
+        assert_eq!(event_pump.lane_depths(), (1, 0, 0));
         sink.emit_for_turn(
             "physical-turn-a",
             lash::TurnActivity::independent(lash::TurnEvent::ModelRequestStarted {
@@ -601,6 +610,7 @@ mod tests {
             }),
         )
         .await;
+        assert_eq!(event_pump.lane_depths(), (1, 0, 0));
         sink.emit_for_turn(
             "physical-turn-b",
             lash::TurnActivity::independent(lash::TurnEvent::TurnStarted {
@@ -620,6 +630,28 @@ mod tests {
             second.event,
             AppEvent::ActiveTurnObserved { stream_id: 11, ref turn_id }
                 if turn_id == "physical-turn-b"
+        ));
+        assert_eq!(event_pump.lane_depths(), (0, 0, 0));
+    }
+
+    #[tokio::test]
+    async fn active_turn_target_sink_falls_back_to_first_activity_turn_id() {
+        let mut event_pump = AppEventPump::new();
+        let sink = ActiveTurnTargetSink::new(12, Some(event_pump.sender()));
+
+        sink.emit_for_turn(
+            "physical-turn-fallback",
+            lash::TurnActivity::independent(lash::TurnEvent::ModelRequestStarted {
+                protocol_iteration: 0,
+            }),
+        )
+        .await;
+
+        let observed = event_pump.recv().await.expect("fallback target event");
+        assert!(matches!(
+            observed.event,
+            AppEvent::ActiveTurnObserved { stream_id: 12, ref turn_id }
+                if turn_id == "physical-turn-fallback"
         ));
         assert_eq!(event_pump.lane_depths(), (0, 0, 0));
     }
