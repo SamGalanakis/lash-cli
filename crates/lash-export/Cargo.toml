@@ -7,7 +7,6 @@ publish = false
 
 [dependencies]
 lash = { workspace = true }
-lash-core = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-sqlite-store = { workspace = true }
 lash-rlm-types = { workspace = true }

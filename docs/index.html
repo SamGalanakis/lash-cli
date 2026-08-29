@@ -243,7 +243,10 @@ $ lash --print "Investigate the latest test failure." \
       "api_key": "sk-ant-...",
       "options": {
         "cache_retention": "long",
-        "max_output_tokens": 16384
+        "max_output_tokens": 16384,
+        "reliability": {
+          "response_start_timeout": 30000
+        }
       }
     }
   },
@@ -254,7 +257,9 @@ $ lash --print "Investigate the latest test failure." \
     "docs": {
       "transport": "stdio",
       "command": "uvx",
-      "args": ["mcp-server-docs"]
+      "args": ["mcp-server-docs"],
+      "graceful_period_ms": 3000,
+      "post_kill_wait_ms": 1000
     }
   },
   "agent_models": {},
@@ -267,11 +272,11 @@ $ lash --print "Investigate the latest test failure." \
               <thead><tr><th>Field</th><th>Type</th><th>Purpose</th></tr></thead>
               <tbody>
                 <tr><td><code>active_provider</code></td><td>string</td><td>Key of the currently active provider; must exist in <code>providers</code>.</td></tr>
-                <tr><td><code>providers</code></td><td>map</td><td>Per-provider credentials and metadata, keyed by provider kind. Shared provider tuning lives under <code>options</code>, including <code>cache_retention</code> (<code>none</code> | <code>short</code> | <code>long</code>) and <code>max_output_tokens</code>.</td></tr>
+                <tr><td><code>providers</code></td><td>map</td><td>Per-provider credentials and metadata, keyed by provider kind. Shared provider tuning lives under <code>options</code>, including <code>cache_retention</code> (<code>none</code> | <code>short</code> | <code>long</code>), <code>max_output_tokens</code>, and <code>reliability.response_start_timeout</code> in milliseconds. Omit the response-start timeout or set it to <code>0</code> to retain the legacy <code>min(request, chunk)</code> bound.</td></tr>
                 <tr><td><code>execution_mode</code></td><td>string</td><td>Default mode for fresh sessions: <code>standard</code> or <code>rlm</code>.</td></tr>
                 <tr><td><code>rlm_dialect</code></td><td>string</td><td>Default language pinned to fresh RLM sessions: <code>lashlang</code> or <code>typescript</code>.</td></tr>
                 <tr><td><code>auxiliary_secrets</code></td><td>object</td><td>Secrets for non-LLM services. Currently <code>tavily_api_key</code>.</td></tr>
-                <tr><td><code>mcp_servers</code></td><td>map</td><td>MCP server configs by name. Discriminated by <code>transport</code>: <code>stdio</code>, <code>streamable_http</code>, or <code>sse</code>.</td></tr>
+                <tr><td><code>mcp_servers</code></td><td>map</td><td>MCP server configs by name. Discriminated by <code>transport</code>: <code>stdio</code>, <code>streamable_http</code>, or <code>sse</code>. Each server may set <code>graceful_period_ms</code> before forced termination and <code>post_kill_wait_ms</code> after it.</td></tr>
                 <tr><td><code>agent_models</code></td><td>map</td><td>User-overridable model names per subagent capability.</td></tr>
                 <tr><td><code>model_defaults</code></td><td>map</td><td>Fresh-session model + variant default per provider kind. Session resumes ignore this and use the persisted head.</td></tr>
               </tbody>
@@ -311,7 +316,7 @@ $ lash --print "Investigate the latest test failure." \
           <div class="section-header">
             <h2>Resume &amp; Fork</h2>
             <p>Every session has a UUID and normally a generated human-readable name. <code>--resume &lt;id_or_name&gt;</code> accepts either; legacy <code>.db</code> filenames are refused as incompatible. Without an argument, <code>/resume</code> opens an interactive picker showing the 50 most recent live root sessions from Lash's unified catalog, sorted by recency. The host roster contributes display metadata only, so catalog-only sessions remain visible with fallback labels. The picker hides zero-turn sessions when any non-empty session exists; direct <code>/resume &lt;id-or-name&gt;</code> may still target any session.</p>
-            <p>The current durable compatibility markers are session schema <code>44</code>, trace schema <code>10</code>, and remote protocol <code>47</code>. <code>lash --version</code> and <code>/info</code> report them.</p>
+            <p>The current durable compatibility markers are session schema <code>45</code>, trace schema <code>10</code>, and remote protocol <code>49</code>. <code>lash --version</code> and <code>/info</code> report them.</p>
           </div>
           <p><code>/fork</code> branches the current session at the current message and opens the fork in a new terminal window. Lash resolves the launcher from the running executable and falls back to finding <code>lash</code> on <code>$PATH</code> if that binary isn't launchable. The launched fork runs <code>lash --resume &lt;new-session-id&gt;</code> in the new terminal.</p>
         </div>

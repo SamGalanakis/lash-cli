@@ -75,6 +75,7 @@ impl AutonomousRenderer {
 
     pub(crate) fn handle(&mut self, activity: TurnActivity) -> Result<(), String> {
         match activity.event {
+            TurnEvent::TurnStarted { .. } => {}
             TurnEvent::AssistantProseDelta { text } => {
                 if !text.is_empty() {
                     self.streamed_text = true;

@@ -38,18 +38,30 @@ impl lash::TurnActivitySink for ActiveTurnTargetSink {
 
     async fn emit(&self, _activity: lash::TurnActivity) {}
 
-    async fn emit_for_turn(&self, turn_id: &str, _activity: lash::TurnActivity) {
+    async fn emit_for_turn(&self, emitted_turn_id: &str, activity: lash::TurnActivity) {
+        let lash::TurnEvent::TurnStarted { turn_id } = activity.event else {
+            debug_assert!(
+                self.last_turn_id
+                    .lock()
+                    .expect("turn target lock")
+                    .as_deref()
+                    == Some(emitted_turn_id),
+                "Lash must emit TurnStarted before other physical-turn activity"
+            );
+            return;
+        };
+        debug_assert_eq!(emitted_turn_id, turn_id);
         {
             let mut last_turn_id = self.last_turn_id.lock().expect("turn target lock");
-            if last_turn_id.as_deref() == Some(turn_id) {
+            if last_turn_id.as_deref() == Some(turn_id.as_str()) {
                 return;
             }
-            *last_turn_id = Some(turn_id.to_string());
+            *last_turn_id = Some(turn_id.clone());
         }
         if let Some(app_tx) = &self.app_tx {
             let _ = app_tx.send(AppEvent::ActiveTurnObserved {
                 stream_id: self.stream_id,
-                turn_id: turn_id.to_string(),
+                turn_id,
             });
         }
     }
@@ -230,18 +242,25 @@ mod tests {
     use std::time::Duration;
 
     use lash::TurnActivitySink as _;
+    use lash::persistence::QueuedWorkStore as _;
 
     use super::*;
     use crate::app::App;
     use crate::event::{AppEvent, AppEventPump};
     use crate::interactive::restore_cancelled_input_texts;
 
-    fn queued_cancel_test_core(provider: lash::provider::ProviderHandle) -> lash::LashCore {
-        lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
-            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+    fn queued_cancel_test_core(
+        provider: lash::provider::ProviderHandle,
+    ) -> (
+        lash::LashCore,
+        Arc<lash::persistence::InMemorySessionStoreFactory>,
+    ) {
+        let store_factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+        let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+            .commit_budget(crate::host_policy::commit_budget())
+            .queued_work_batching(crate::host_policy::queued_work_batching())
             .effect_host(Arc::new(
-                lash::durability::InlineEffectHost::default()
+                lash::durability::NativeEffectHost::default()
                     .allow_process_lifetime_completion_keys(),
             ))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
@@ -251,19 +270,110 @@ mod tests {
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("queued-cancel-test")
-                    .context_window_tokens(16_384)
+                    .context_window_tokens(1_000_000)
                     .build()
                     .expect("test model"),
             )
-            .store_factory(Arc::new(
-                lash::persistence::InMemorySessionStoreFactory::new(),
-            ))
-            .disable_queued_work_driver()
+            .store_factory(store_factory.clone())
+            .without_queued_work()
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "lash-cli-test",
                 "queued-cancel",
             ))
-            .expect("test core")
+            .expect("test core");
+        (core, store_factory)
+    }
+
+    async fn observed_turn_target(event_pump: &mut AppEventPump, stream_id: u64) -> String {
+        let observed = tokio::time::timeout(Duration::from_secs(2), event_pump.recv())
+            .await
+            .expect("turn target event")
+            .expect("event pump remains open");
+        let AppEvent::ActiveTurnObserved {
+            stream_id: observed_stream_id,
+            turn_id,
+        } = observed.event
+        else {
+            panic!("expected active-turn target event");
+        };
+        assert_eq!(observed_stream_id, stream_id);
+        turn_id
+    }
+
+    async fn enqueue_selected_task(
+        store_factory: &lash::persistence::InMemorySessionStoreFactory,
+        session_id: &str,
+        source_key: &str,
+        task: String,
+    ) -> lash::persistence::QueuedWorkBatch {
+        let store = store_factory
+            .raw_store_for_testing(session_id)
+            .expect("opened session retains its in-memory store");
+        store
+            .enqueue_queued_work(
+                lash::persistence::QueuedWorkBatchDraft::new(
+                    session_id,
+                    lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
+                    vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
+                        lash::testing::frame_node_id(session_id, source_key),
+                        task,
+                        None,
+                    )],
+                )
+                .with_source_key(source_key),
+            )
+            .await
+            .expect("enqueue selected queued work")
+    }
+
+    #[tokio::test]
+    async fn direct_turn_started_immediately_targets_exact_cancellation() {
+        let provider = lash::testing::TestProvider::builder()
+            .kind("direct-turn-started-cancel")
+            .complete(|_request| async {
+                std::future::pending::<()>().await;
+                unreachable!("provider future is cancelled with the turn")
+            })
+            .build()
+            .into_handle();
+        let (core, _) = queued_cancel_test_core(provider);
+        let session = core
+            .session("direct-turn-started-cancel")
+            .open()
+            .await
+            .expect("open test session");
+        let mut event_pump = AppEventPump::new();
+        let (_process_cancel, return_rx) = spawn_session_turn(
+            session.clone(),
+            TurnInput::text("wait for cancellation"),
+            5,
+            Some(event_pump.sender()),
+        );
+
+        let turn_id = observed_turn_target(&mut event_pump, 5).await;
+        assert_eq!(turn_id, "cli-turn:5");
+        let receipt = session
+            .request_turn_cancel(
+                &turn_id,
+                "direct-turn-started-cancel-request",
+                Some("lash-cli-test".to_string()),
+                Some("cancel from TurnStarted target".to_string()),
+            )
+            .await
+            .expect("request exact direct-turn cancellation");
+        assert!(matches!(
+            receipt.outcome,
+            lash::TurnCancelOutcome::Requested(_)
+        ));
+
+        let done = tokio::time::timeout(Duration::from_secs(2), return_rx)
+            .await
+            .expect("direct turn settles")
+            .expect("direct turn returns report");
+        assert!(matches!(
+            done.result.outcome,
+            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
+        ));
     }
 
     #[tokio::test]
@@ -284,7 +394,7 @@ mod tests {
             })
             .build()
             .into_handle();
-        let core = queued_cancel_test_core(provider);
+        let (core, _) = queued_cancel_test_core(provider);
         let session = core
             .session("queued-cancel-test")
             .open()
@@ -304,14 +414,7 @@ mod tests {
             .await
             .expect("queued drain reaches provider")
             .expect("provider-start signal");
-        let observed = tokio::time::timeout(Duration::from_secs(2), event_pump.recv())
-            .await
-            .expect("turn target event")
-            .expect("event pump remains open");
-        let AppEvent::ActiveTurnObserved { stream_id, turn_id } = observed.event else {
-            panic!("expected active-turn target event");
-        };
-        assert_eq!(stream_id, 7);
+        let turn_id = observed_turn_target(&mut event_pump, 7).await;
         let dropped_steer = session
             .enqueue(TurnInput::text("dropped queued steer"))
             .id("queued-cancel-steer")
@@ -338,7 +441,7 @@ mod tests {
             receipt.outcome,
             lash::TurnCancelOutcome::Requested(_)
         ));
-        process_cancel.cancel();
+        drop(process_cancel);
 
         let done = tokio::time::timeout(Duration::from_secs(2), return_rx)
             .await
@@ -368,9 +471,129 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_turn_target_sink_tracks_each_distinct_physical_turn_id() {
+    async fn selected_batch_turn_started_immediately_targets_exact_cancellation() {
+        let provider = lash::testing::TestProvider::builder()
+            .kind("selected-turn-started-cancel")
+            .complete(|_request| async {
+                std::future::pending::<()>().await;
+                unreachable!("provider future is cancelled with the turn")
+            })
+            .build()
+            .into_handle();
+        let (core, store_factory) = queued_cancel_test_core(provider);
+        let session_id = "selected-turn-started-cancel";
+        let session = core
+            .session(session_id)
+            .open()
+            .await
+            .expect("open test session");
+        let selected = enqueue_selected_task(
+            &store_factory,
+            session_id,
+            "selected-cancel-source",
+            "selected queued input".to_string(),
+        )
+        .await;
+        let mut event_pump = AppEventPump::new();
+        let target_sink = ActiveTurnTargetSink::new(13, Some(event_pump.sender()));
+        let run_session = session.clone();
+        let run = tokio::spawn(async move {
+            run_session
+                .queued_turn()
+                .batch_ids([selected.batch_id])
+                .turn_id("selected-turn-started-cancel-id")
+                .stream_to(&target_sink)
+                .await
+        });
+
+        let turn_id = observed_turn_target(&mut event_pump, 13).await;
+        assert_eq!(turn_id, "selected-turn-started-cancel-id");
+        let receipt = session
+            .request_turn_cancel(
+                &turn_id,
+                "selected-turn-started-cancel-request",
+                Some("lash-cli-test".to_string()),
+                Some("cancel selected drain from TurnStarted target".to_string()),
+            )
+            .await
+            .expect("request exact selected-turn cancellation");
+        assert!(matches!(
+            receipt.outcome,
+            lash::TurnCancelOutcome::Requested(_)
+        ));
+
+        let outcome = tokio::time::timeout(Duration::from_secs(2), run)
+            .await
+            .expect("selected turn settles")
+            .expect("selected turn task joins")
+            .expect("selected drain succeeds");
+        let report = outcome.turn.expect("selected drain ran a turn");
+        assert!(matches!(
+            report.outcome,
+            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn large_selected_queued_input_commits_with_cli_budget() {
+        let provider = lash::testing::TestProvider::builder()
+            .kind("selected-commit-budget")
+            .complete(|_request| async {
+                Ok(lash::provider::LlmResponse {
+                    parts: vec![lash::direct::LlmOutputPart::Text {
+                        text: "large selected input committed".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..Default::default()
+                })
+            })
+            .build()
+            .into_handle();
+        let (core, store_factory) = queued_cancel_test_core(provider);
+        let session_id = "selected-commit-budget";
+        let session = core
+            .session(session_id)
+            .open()
+            .await
+            .expect("open test session");
+        let selected = enqueue_selected_task(
+            &store_factory,
+            session_id,
+            "large-selected-source",
+            "x".repeat(96 * 1024),
+        )
+        .await;
+
+        let outcome = session
+            .queued_turn()
+            .batch_ids([selected.batch_id])
+            .turn_id("large-selected-turn")
+            .run()
+            .await
+            .expect("large selected drain remains within CLI commit budget");
+        let turn = outcome.turn.expect("large selected drain ran a turn");
+        assert!(matches!(
+            turn.result.outcome,
+            lash::TurnOutcome::Finished(_)
+        ));
+        assert_eq!(
+            turn.result.assistant_output.safe_text,
+            "large selected input committed"
+        );
+    }
+
+    #[tokio::test]
+    async fn active_turn_target_sink_uses_only_turn_started_and_tracks_successive_turns() {
         let mut event_pump = AppEventPump::new();
         let sink = ActiveTurnTargetSink::new(11, Some(event_pump.sender()));
+        sink.emit_for_turn(
+            "physical-turn-a",
+            lash::TurnActivity::independent(lash::TurnEvent::TurnStarted {
+                turn_id: "physical-turn-a".to_string(),
+            }),
+        )
+        .await;
         sink.emit_for_turn(
             "physical-turn-a",
             lash::TurnActivity::independent(lash::TurnEvent::ModelRequestStarted {
@@ -380,8 +603,8 @@ mod tests {
         .await;
         sink.emit_for_turn(
             "physical-turn-b",
-            lash::TurnActivity::independent(lash::TurnEvent::ModelRequestStarted {
-                protocol_iteration: 1,
+            lash::TurnActivity::independent(lash::TurnEvent::TurnStarted {
+                turn_id: "physical-turn-b".to_string(),
             }),
         )
         .await;

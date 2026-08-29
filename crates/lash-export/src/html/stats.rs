@@ -1,6 +1,6 @@
 use lash::messages::MessageRole;
+use lash::messages::PruneState;
 use lash::persistence::ChronologicalPayload;
-use lash_core::session_model::PruneState;
 
 use crate::LoadedSession;
 use crate::transcript::lashlang_transcript_step_from_event;
