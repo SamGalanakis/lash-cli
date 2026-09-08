@@ -148,7 +148,6 @@ pub(crate) fn llm_rerank_request(
                 parts: vec![DirectPart::Text(prompt)],
             },
         ],
-        attachments: Vec::new(),
         output: DirectOutputSpec::JsonSchema(schema),
         stream_events: None,
         generation: lash::direct::GenerationOptions::default(),

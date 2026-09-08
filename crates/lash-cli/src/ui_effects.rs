@@ -222,6 +222,8 @@ pub(crate) fn observed_to_process_snapshot(
 ) -> crate::app::ProcessSnapshot {
     let lash::process::ObservedProcess {
         process_id,
+        incarnation,
+        last_event_sequence,
         graph_key: _,
         kind: _,
         lifecycle,
@@ -246,8 +248,9 @@ pub(crate) fn observed_to_process_snapshot(
         label: _,
     } = process;
     crate::app::ProcessSnapshot {
-        view: lash::process::ProcessHandleView::new(process_id, identity, lifecycle),
+        view: lash::process::ProcessHandleView::new(process_id, incarnation, identity, lifecycle),
         updated_at_ms: Some(updated_at_ms),
+        last_event_sequence,
     }
 }
 
@@ -257,12 +260,23 @@ fn push_plugin_operation_message(app: &mut App, output: &serde_json::Value) {
     }
 }
 
+pub(crate) fn process_dock_filter(now_ms: u64) -> lash::process::ProcessListFilter {
+    lash::process::ProcessListFilter {
+        status: lash::process::ProcessStatusFilter::Any,
+        retired_since_ms: Some(
+            now_ms.saturating_sub(crate::app::PROCESS_RETENTION.as_millis() as u64),
+        ),
+        ..Default::default()
+    }
+}
+
 pub(crate) async fn collect_ui_snapshot(
     session: lash::LashSession,
+    runtime_factory: &crate::startup::session::CliSessionOpener,
 ) -> crate::event::UiSnapshotResult {
     let started = std::time::Instant::now();
     let mut diagnostics = Vec::new();
-    let processes = match session.processes().list_all().await {
+    let processes = match runtime_factory.list_dock_processes(&session).await {
         Ok(tasks) => Some(
             tasks
                 .into_iter()
@@ -286,6 +300,45 @@ pub(crate) async fn collect_ui_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dock_filter_keeps_old_live_and_recent_retired_records() {
+        use lash::process::{
+            ProcessIncarnation, ProcessInput, ProcessProvenance, ProcessRecord,
+            ProcessRegistration, ProcessStatus, RecoveryContract,
+        };
+        let retention_ms = crate::app::PROCESS_RETENTION.as_millis() as u64;
+        let now_ms = retention_ms * 3;
+        let filter = process_dock_filter(now_ms);
+        let mut record = ProcessRecord::from_registration(
+            ProcessRegistration::new(
+                "task",
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryContract::ExternallyOwned,
+                ProcessProvenance::host(),
+            ),
+            ProcessIncarnation::from_registration_sequence(1),
+        );
+        record.updated_at_ms = 0;
+        for status in [ProcessStatus::Running, ProcessStatus::Waiting] {
+            record.status = status;
+            assert!(filter.matches_record(&record));
+        }
+        for status in [
+            ProcessStatus::Completed,
+            ProcessStatus::Failed,
+            ProcessStatus::Cancelled,
+            ProcessStatus::Abandoned,
+        ] {
+            record.status = status;
+            record.updated_at_ms = now_ms - retention_ms;
+            assert!(filter.matches_record(&record));
+            record.updated_at_ms -= 1;
+            assert!(!filter.matches_record(&record));
+        }
+    }
 
     #[test]
     fn desktop_notification_effect_respects_focus() {

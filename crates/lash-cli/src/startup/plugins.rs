@@ -77,11 +77,6 @@ pub(super) fn plugin_factories_for_surface(input: PluginFactorySurfaceInput<'_>)
             );
         }
         plugin_stack.push(cli_ask_plugin_factory(prompt_bridge));
-        // `update_plan` drives the sticky plan dock at the bottom of
-        // the TUI. Interactive-only here; root-only inside the plugin
-        // itself (the factory returns an inert plugin for subagent
-        // / compaction / other non-root sessions).
-        plugin_stack.push(Arc::new(crate::plan_plugin::UpdatePlanPluginFactory));
     }
     plugin_stack.push(Arc::new(lash_autoresearch::AutoresearchPluginFactory));
     if execution_mode.is_rlm() {
@@ -110,16 +105,10 @@ fn cli_child_tool_access() -> SessionToolAccess {
 }
 
 fn cli_child_hidden_tools() -> BTreeSet<String> {
-    [
-        "ask",
-        "showcase",
-        "request_user_input",
-        "plan_exit",
-        "update_plan",
-    ]
-    .into_iter()
-    .map(ToOwned::to_owned)
-    .collect()
+    ["ask", "showcase", "request_user_input", "plan_exit"]
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn autonomous_tool_allowed(name: &str) -> bool {
@@ -241,8 +230,8 @@ mod tests {
         let template = layer.template.as_ref().expect("cli prompt template");
         let contributions = layer
             .slots
-            .values()
-            .flat_map(|slot| slot.contributions.iter())
+            .iter()
+            .flat_map(|(key, slot)| slot.contributions.iter().map(move |body| (key, body)))
             .collect::<Vec<_>>();
 
         let execution = template
@@ -259,8 +248,8 @@ mod tests {
             )
         }));
         assert!(
-            !contributions.iter().any(|contribution| {
-                contribution.slot == PromptSlot::Execution
+            !contributions.iter().any(|(slot, contribution)| {
+                **slot == PromptSlot::Execution
                     && contribution.title.as_deref() == Some("RLM Response Finalization")
             }),
             "RLM response-shape guidance belongs to the protocol execution section"
@@ -272,11 +261,11 @@ mod tests {
         let layer = cli_prompt_config(false, &ExecutionMode::Standard);
         let contributions = layer
             .slots
-            .values()
-            .flat_map(|slot| slot.contributions.iter())
+            .iter()
+            .flat_map(|(key, slot)| slot.contributions.iter().map(move |body| (key, body)))
             .collect::<Vec<_>>();
 
-        assert!(!contributions.iter().any(|contribution| {
+        assert!(!contributions.iter().any(|(_, contribution)| {
             contribution.title.as_deref() == Some("RLM Response Finalization")
         }));
     }
@@ -287,8 +276,8 @@ mod tests {
         let template = layer.template.as_ref().expect("cli prompt template");
         let contributions = layer
             .slots
-            .values()
-            .flat_map(|slot| slot.contributions.iter())
+            .iter()
+            .flat_map(|(key, slot)| slot.contributions.iter().map(move |body| (key, body)))
             .collect::<Vec<_>>();
 
         assert!(template.sections.iter().any(|section| {
@@ -311,12 +300,11 @@ mod tests {
                 )
             })
         }));
-        assert!(contributions.iter().any(|contribution| {
-            contribution.slot == PromptSlot::Intro
-                && contribution.content.as_ref() == CLI_AUTONOMOUS_INTRO
+        assert!(contributions.iter().any(|(slot, contribution)| {
+            **slot == PromptSlot::Intro && contribution.content.as_ref() == CLI_AUTONOMOUS_INTRO
         }));
-        assert!(contributions.iter().any(|contribution| {
-            contribution.slot == PromptSlot::Execution
+        assert!(contributions.iter().any(|(slot, contribution)| {
+            **slot == PromptSlot::Execution
                 && contribution.content.as_ref() == CLI_AUTONOMOUS_EXECUTION
         }));
     }
@@ -335,7 +323,6 @@ mod tests {
 
         assert!(hidden.contains("ask"));
         assert!(hidden.contains("plan_exit"));
-        assert!(hidden.contains("update_plan"));
         assert!(hidden.contains("showcase"));
         assert!(hidden.contains("request_user_input"));
     }

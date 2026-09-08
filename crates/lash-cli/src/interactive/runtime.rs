@@ -167,7 +167,6 @@ pub(super) async fn send_user_message(
     );
     *active_stream_id = active_stream_id.wrapping_add(1);
     let stream_id = *active_stream_id;
-    app.set_active_turn_id(format!("cli-turn:{stream_id}"));
 
     tracing::debug!(
         stream_id,
@@ -502,5 +501,125 @@ mod copy_tests {
             copy_candidate_text(&app, Some((80, 24))).as_deref(),
             Some("newer")
         );
+    }
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::app::App;
+    use crate::event::{AppEvent, AppEventPump};
+    use crate::session_log::SessionLogger;
+    use crate::test_support::{EnvVarGuard, TempDirGuard, env_lock};
+
+    #[tokio::test]
+    async fn dispatch_window_has_no_active_turn_id_until_lash_observes_one() {
+        let _env_lock = env_lock().lock().await;
+        let temp = TempDirGuard::new("turn-id-dispatch");
+        let _lash_home = EnvVarGuard::set("LASH_HOME", temp.path());
+
+        let provider = lash::testing::TestProvider::builder()
+            .kind("dispatch-window-turn-id")
+            .complete(|_request| async {
+                std::future::pending::<()>().await;
+                unreachable!("provider future is cancelled with the turn")
+            })
+            .build()
+            .into_handle();
+        let store_factory = Arc::new(lash::persistence::InMemorySessionStoreFactory::new());
+        let core = lash::LashCore::standard_builder(lash::TurnBudget::Unbounded)
+            .commit_budget(crate::host_policy::commit_budget())
+            .queued_work_batching(crate::host_policy::queued_work_batching())
+            .effect_host(Arc::new(
+                lash::durability::NativeEffectHost::default()
+                    .allow_process_lifetime_completion_keys(),
+            ))
+            .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
+            .process_env_store(Arc::new(
+                lash::persistence::InMemoryProcessExecutionEnvStore::new(),
+            ))
+            .provider(provider)
+            .model(
+                lash::ModelSpec::builder("dispatch-window-turn-id")
+                    .context_window_tokens(1_000_000)
+                    .build()
+                    .expect("test model"),
+            )
+            .store_factory(store_factory)
+            .without_queued_work()
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "lash-cli-test",
+                "dispatch-window-turn-id",
+            ))
+            .expect("test core");
+        let session = core
+            .session("dispatch-window-turn-id")
+            .open()
+            .await
+            .expect("open test session");
+        let mut runtime = Some(session);
+        let mut app = App::new(
+            "dispatch-window-turn-id".to_string(),
+            "dispatch-window-turn-id".to_string(),
+            "dispatch-window-turn-id".to_string(),
+        );
+        let prepared_turn = PreparedTurn::new("dispatch window".to_string(), Vec::new());
+        let mut logger = SessionLogger::new(
+            "dispatch-window-turn-id".to_string(),
+            "dispatch-window-turn-id".to_string(),
+            "dispatch-window-turn-id",
+            None,
+        )
+        .expect("test session logger");
+        let mut history = Vec::new();
+        let mut runtime_return_rx = None;
+        let mut cancel_token = None;
+        let mut active_stream_id = 0;
+        let mut event_pump = AppEventPump::new();
+
+        send_user_message(
+            prepared_turn.clone(),
+            make_turn_input(&prepared_turn),
+            &mut app,
+            None,
+            &mut logger,
+            &mut runtime,
+            &mut history,
+            &mut runtime_return_rx,
+            &mut cancel_token,
+            &mut active_stream_id,
+            &event_pump.sender(),
+        )
+        .await;
+
+        assert_eq!(app.active_turn_id(), None);
+
+        let observed = tokio::time::timeout(Duration::from_secs(2), event_pump.recv())
+            .await
+            .expect("Lash reports the active turn")
+            .expect("event pump remains open");
+        let AppEvent::ActiveTurnObserved { stream_id, turn_id } = observed.event else {
+            panic!("expected active-turn target event");
+        };
+        assert_eq!(stream_id, active_stream_id);
+        assert!(!turn_id.contains(':'));
+        app.set_active_turn_id(turn_id.clone());
+        assert_eq!(app.active_turn_id(), Some(turn_id.as_str()));
+
+        cancel_token
+            .take()
+            .expect("dispatch owns cancellation")
+            .cancel();
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            runtime_return_rx
+                .take()
+                .expect("dispatch owns return channel"),
+        )
+        .await
+        .expect("cancelled dispatch settles");
     }
 }

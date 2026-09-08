@@ -28,17 +28,6 @@ fn queue_preview_height(app: &App, frame_width: u16) -> u16 {
     queue_preview_lines_snapshot(app, frame_width).len() as u16
 }
 
-/// Rows the plan checklist contributes to the trailing end of the
-/// transcript: 1 blank gutter + 1 `Plan` header + N items. Must stay in
-/// lockstep with [`plan_dock_lines_snapshot`](crate::render::plan_dock_lines_snapshot),
-/// since the bottom-anchor pad derives the underflow from this total.
-pub fn plan_dock_trailing_height(app: &App) -> usize {
-    match app.plan_dock.as_ref() {
-        Some(plan) if !plan.is_empty() => 2 + plan.items.len(),
-        _ => 0,
-    }
-}
-
 pub fn process_dock_height(app: &App, frame_width: u16) -> u16 {
     process_lines_snapshot(app, frame_width)
         .map(|lines| lines.len() as u16)

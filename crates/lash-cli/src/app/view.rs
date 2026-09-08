@@ -44,9 +44,8 @@ impl App {
             session_name,
             session_id,
             plugin_mode_indicators,
-            plan_dock,
             processes,
-            selected_process_id,
+            selected_process_ref,
             activity_state,
             ui_activity_journal,
             pending_ui_activity_records,
@@ -90,9 +89,8 @@ impl App {
         session_name.clear();
         session_id.clear();
         plugin_mode_indicators.clear();
-        *plan_dock = None;
         processes.clear();
-        *selected_process_id = None;
+        *selected_process_ref = None;
         activity_state.reset();
         *ui_activity_journal = UiActivityJournal::default();
         pending_ui_activity_records.clear();
@@ -521,7 +519,6 @@ impl App {
             + crate::render::live_tool_output_standalone_height(self, width)
             + self.live_reasoning_height()
             + self.live_assistant_height()
-            + crate::render::plan_dock_trailing_height(self)
     }
 }
 

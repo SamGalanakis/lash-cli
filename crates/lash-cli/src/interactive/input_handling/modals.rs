@@ -118,7 +118,11 @@ pub(super) fn show_selected_process_overview(app: &mut App) {
     app.show_process_overview(overview);
 }
 
-pub(super) async fn cancel_selected_process(app: &mut App, runtime: &Option<LashSession>) {
+pub(super) async fn cancel_selected_process(
+    app: &mut App,
+    runtime: &Option<LashSession>,
+    runtime_factory: &crate::startup::session::CliSessionOpener,
+) {
     let Some(process) = app.selected_process().cloned() else {
         return;
     };
@@ -163,7 +167,7 @@ pub(super) async fn cancel_selected_process(app: &mut App, runtime: &Option<Lash
                     summary.status.label()
                 ),
             );
-            match processes.list_all().await {
+            match runtime_factory.list_dock_processes(session).await {
                 Ok(processes) => app.update_processes(
                     processes
                         .into_iter()
@@ -357,7 +361,7 @@ pub(super) async fn handle_process_overview_key(key: KeyEvent, ctx: &mut Session
     match key.code {
         KeyCode::Enter => ctx.app.dismiss_process_overview(),
         KeyCode::Delete => {
-            cancel_selected_process(ctx.app, ctx.runtime).await;
+            cancel_selected_process(ctx.app, ctx.runtime, ctx.runtime_factory).await;
             ctx.app.dismiss_process_overview();
         }
         _ => {}

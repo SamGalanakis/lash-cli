@@ -384,9 +384,11 @@ mod tests {
         app.update_processes(vec![crate::app::ProcessSnapshot {
             view: lash::process::ProcessHandleView::new(
                 "process-1",
+                lash::process::ProcessIncarnation::from_registration_sequence(1),
                 lash::process::ProcessIdentity::new("lashlang").with_label(Some("responder")),
                 lash::process::ProcessStatus::Running,
             ),
+            last_event_sequence: 1,
             updated_at_ms: None,
         }]);
         sync_chrome_turn_status(&app);
@@ -427,6 +429,7 @@ mod tests {
         app.update_processes(vec![crate::app::ProcessSnapshot {
             view: lash::process::ProcessHandleView::new(
                 "process-1",
+                lash::process::ProcessIncarnation::from_registration_sequence(1),
                 lash::process::ProcessIdentity::new("lashlang")
                     .with_label(Some("responder"))
                     .with_definition(Some(
@@ -440,6 +443,7 @@ mod tests {
                     )),
                 lash::process::ProcessStatus::Running,
             ),
+            last_event_sequence: 1,
             updated_at_ms: None,
         }]);
         app.select_next_process();
@@ -469,8 +473,8 @@ mod tests {
         let (response_tx, _response_rx) = mpsc::channel();
         app.show_prompt(PromptState {
             request: PromptRequest::single(
-                "Plan .lash/plans/15d5a2bd-841d-4729-8968-ae7874385e16.md is ready. Exit plan mode now?",
-                vec!["Exit plan mode".into(), "Keep planning".into()],
+                "Review workspace/15d5a2bd-841d-4729-8968-ae7874385e16.md is ready. Exit review mode now?",
+                vec!["Exit review mode".into(), "Keep reviewing".into()],
             )
             .with_optional_note(),
             focus: PromptFocus::Options,
@@ -484,7 +488,7 @@ mod tests {
 
         let snapshot = lash_tui::render_snapshot(84, 14, |frame| draw(frame, &mut app));
         let visible = snapshot.visible_lines_trimmed().join("\n");
-        assert!(visible.contains("Plan .lash/plans/15d5a2bd-841d-4729-8968-ae7874385e16.md"));
+        assert!(visible.contains("Review workspace/15d5a2bd-841d-4729-8968-ae7874385e16.md"));
         assert!(visible.contains("Choices"));
         assert!(!visible.contains("Question"));
         assert!(!visible.contains("┌"));
@@ -495,10 +499,10 @@ mod tests {
         let mut app = App::new("gpt-5.4".into(), "test".into(), "test-session-id".into());
         let (response_tx, _response_rx) = mpsc::channel();
         app.show_prompt(PromptState {
-            request: PromptRequest::single("Exit plan mode?", vec!["Exit".into()])
+            request: PromptRequest::single("Review mode?", vec!["Exit".into()])
                 .with_markdown_panel(
-                    "PLAN",
-                    "# Plan\n\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12",
+                    "REVIEW",
+                    "# Review\n\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12",
                 ),
             focus: PromptFocus::Options,
             cursor: 0,
@@ -720,8 +724,8 @@ mod tests {
     }
 
     #[test]
-    fn short_transcript_bottom_anchors_against_input_with_plan_gutter() {
-        use crate::app::{PlanDockItem, PlanDockItemStatus, PlanDockState, UiTimelineItem};
+    fn short_transcript_bottom_anchors_against_input() {
+        use crate::app::UiTimelineItem;
         let mut app = App::new("gpt-5.5".into(), "test".into(), "test-session-id".into());
         app.model_variant = Some("xhigh".into());
         app.execution_mode_label = "rlm".into();
@@ -731,21 +735,6 @@ mod tests {
             "ok make the required changes and ship it".into(),
         )]
         .into();
-        app.plan_dock = Some(PlanDockState {
-            title: "Plan".into(),
-            meta: None,
-            items: vec![
-                PlanDockItem {
-                    text: "Check git state vs main".into(),
-                    status: PlanDockItemStatus::Done,
-                },
-                PlanDockItem {
-                    text: "Monitor GitHub Actions and fix failures".into(),
-                    status: PlanDockItemStatus::Active,
-                },
-            ],
-        });
-
         let lines = lash_tui::render_snapshot(80, 16, |frame| draw(frame, &mut app))
             .visible_lines_trimmed();
         let row = |needle: &str| {
@@ -763,19 +752,11 @@ mod tests {
             lines[0]
         );
 
-        // The user message and the Plan header are separated by a blank gutter.
         let message = row("ok make the required changes");
-        let plan = row("Plan");
-        assert_eq!(plan, message + 2, "expected one gutter row before Plan");
-        assert!(lines[message + 1].trim().is_empty(), "gutter row not blank");
-
-        // The last checklist item hugs the input: the row directly below it is
-        // the input's top rule (full-width ─), not empty space.
-        let last_item = row("Monitor GitHub Actions");
         assert!(
-            lines[last_item + 1].starts_with("───"),
-            "checklist should sit directly above the input rule, got {:?}",
-            lines[last_item + 1]
+            lines[message + 1].starts_with("───"),
+            "message should sit directly above the input rule, got {:?}",
+            lines[message + 1]
         );
     }
 

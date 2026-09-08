@@ -411,27 +411,13 @@ fn live_activity_event(index: usize) -> TurnEvent {
             graph_key: None,
             parent_call_id: None,
         },
-        10 => TurnEvent::ToolCallCompleted {
-            call_id: Some(format!("plan-{index}")),
-            name: "update_plan".to_string(),
-            args: json!({
-                "plan": [
-                    {"step": "Inspect projection", "status": "completed"},
-                    {"step": "Patch profiler", "status": "in_progress"}
-                ]
-            }),
-            output: ToolCallOutput::success(json!({ "ok": true })),
-            duration_ms: 1,
-            graph_key: None,
-            parent_call_id: None,
-        },
-        11 => TurnEvent::RetryStatus {
+        10 => TurnEvent::RetryStatus {
             wait_seconds: 1,
             attempt: 2,
             max_attempts: 3,
             reason: "provider backpressure while profiling".to_string(),
         },
-        12 => TurnEvent::FinalValue {
+        11 => TurnEvent::FinalValue {
             value: json!({ "status": "done", "index": index }),
         },
         _ => TurnEvent::ToolCallCompleted {

@@ -170,6 +170,9 @@ impl ConfigLoadOutcome {
 #[serde(deny_unknown_fields)]
 pub struct LashConfig {
     pub active_provider: String,
+    /// Live host retry policy, reapplied whenever a session is opened.
+    #[serde(default)]
+    pub charge_safety: lash::ChargeSafetyPolicy,
     #[serde(default)]
     pub theme: ThemeName,
     pub providers: BTreeMap<String, ProviderConfig>,
@@ -202,6 +205,7 @@ impl LashConfig {
         providers.insert(kind.clone(), provider);
         Self {
             active_provider: kind,
+            charge_safety: lash::ChargeSafetyPolicy::default(),
             theme: ThemeName::default(),
             providers,
             execution_mode: crate::execution_settings::ExecutionMode::default(),
@@ -546,6 +550,7 @@ fn materialize_test_provider(config: &ProviderConfig) -> Result<ProviderHandle, 
         .and_then(serde_json::Value::as_str)
         .unwrap_or("rlm-subagent-smoke");
     match scenario {
+        "charge-safety" => Ok(charge_safety_provider().into_handle()),
         "standard-echo" => Ok(standard_echo_provider().into_handle()),
         "standard-slow-echo" => Ok(standard_slow_echo_provider().into_handle()),
         "standard-gated-escape" => Ok(standard_gated_escape_provider().into_handle()),
@@ -555,6 +560,48 @@ fn materialize_test_provider(config: &ProviderConfig) -> Result<ProviderHandle, 
         "rlm-nonzero-exit-smoke" => Ok(rlm_nonzero_exit_smoke_provider().into_handle()),
         other => Err(format!("unknown CLI test provider scenario `{other}`")),
     }
+}
+
+#[cfg(feature = "test-provider")]
+fn charge_safety_provider() -> lash::testing::TestProvider {
+    let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut options = ProviderOptions::default();
+    options.reliability.retry.base_delay_ms = 0;
+    options.reliability.retry.max_delay_ms = 0;
+    options.reliability.retry.jitter_ms = 0;
+    lash::testing::TestProvider::builder()
+        .kind("test")
+        .options(options)
+        .serialize_config(|| serde_json::json!({"scenario": "charge-safety"}))
+        .complete(move |_| {
+            let attempt = attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async move {
+                let response = lash::provider::LlmResponse {
+                    parts: vec![lash::direct::LlmOutputPart::Text {
+                        text: if attempt == 0 {
+                            "PRIVATE PARTIAL"
+                        } else {
+                            "charge-safe retry completed"
+                        }
+                        .into(),
+                        response_meta: None,
+                    }],
+                    ..Default::default()
+                };
+                if attempt == 0 {
+                    Err(lash::provider::LlmTransportError::new("stream interrupted")
+                        .with_kind(lash::provider::ProviderFailureKind::Stream)
+                        .with_retry_verdict(
+                            lash::provider::TransportRetryVerdict::RetryableTransient,
+                        )
+                        .with_output_started(true)
+                        .with_partial_response(response))
+                } else {
+                    Ok(response)
+                }
+            }
+        })
+        .build()
 }
 
 #[cfg(feature = "test-provider")]
@@ -858,6 +905,32 @@ fn request_contains_subagent_prompt(request: &lash::provider::LlmRequest) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn charge_safety_defaults_and_roundtrips_bounded_opt_in() {
+        let mut value = serde_json::json!({"active_provider": "openai", "providers": {}});
+        let default: LashConfig = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            default.charge_safety,
+            lash::ChargeSafetyPolicy::RequireGuarantee
+        );
+        value["charge_safety"] = serde_json::json!({"mode": "accept_duplicate_billing",
+            "max_unsafe_retries": 3, "max_duplicate_cost_tokens": 1000});
+        let config: LashConfig = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(
+            config.charge_safety,
+            lash::ChargeSafetyPolicy::AcceptDuplicateBilling {
+                max_unsafe_retries: 3,
+                max_duplicate_cost_tokens: Some(1000),
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&config).unwrap()["charge_safety"],
+            value["charge_safety"]
+        );
+        value["charge_safety"] = serde_json::json!({"mode": "accept_duplicate_billing"});
+        assert!(serde_json::from_value::<LashConfig>(value).is_err());
+    }
 
     #[test]
     fn load_outcome_reports_missing_config() {

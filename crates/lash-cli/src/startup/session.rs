@@ -84,6 +84,7 @@ pub(crate) struct CliSessionOpener {
     trace_jsonl_path: Option<PathBuf>,
     trace_level: lash::tracing::TraceLevel,
     owns_visible_queued_turns: bool,
+    charge_safety: lash::ChargeSafetyPolicy,
     opened_cores: Arc<tokio::sync::Mutex<Vec<LashCore>>>,
 }
 
@@ -163,6 +164,7 @@ impl CliSessionOpener {
         trace_jsonl_path: Option<PathBuf>,
         trace_level: lash::tracing::TraceLevel,
         owns_visible_queued_turns: bool,
+        charge_safety: lash::ChargeSafetyPolicy,
     ) -> Self {
         Self {
             plugin_stack,
@@ -173,6 +175,7 @@ impl CliSessionOpener {
             trace_jsonl_path,
             trace_level,
             owns_visible_queued_turns,
+            charge_safety,
             opened_cores: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         }
     }
@@ -193,6 +196,24 @@ impl CliSessionOpener {
             .last()
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("no Lash core is open"))
+    }
+
+    pub(crate) async fn list_dock_processes(
+        &self,
+        session: &LashSession,
+    ) -> Result<Vec<lash::process::ObservedProcess>> {
+        let core = self.active_core().await?;
+        let session_scope = session.observe().process_scope();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis() as u64);
+        Ok(core
+            .processes()
+            .list_observed_by(
+                &session_scope,
+                &crate::ui_effects::process_dock_filter(now_ms),
+            )
+            .await?)
     }
 
     pub(crate) async fn list_recent_sessions(
@@ -278,6 +299,7 @@ impl CliSessionOpener {
             }
         };
         let mut builder = builder
+            .charge_safety(self.charge_safety.clone())
             .provider(self.provider.clone())
             .model(fallback_policy.model.clone())
             .no_progress_budget(crate::host_policy::no_progress_budget())
@@ -320,6 +342,7 @@ impl CliSessionOpener {
         }
 
         let session_spec = SessionSpec::new()
+            .charge_safety(self.charge_safety.clone())
             .provider_id(fallback_policy.provider_id.clone())
             .model(fallback_policy.model.clone())
             .turn_budget(crate::host_policy::turn_budget())
@@ -348,7 +371,7 @@ impl CliSessionOpener {
             anyhow::anyhow!("could not open session with RLM dialect `{requested}`: {error}")
         })?;
         if let Some(requested) = host_config.rlm_dialect {
-            let recorded = session.rlm_config().dialect.unwrap_or_default();
+            let recorded = session.rlm_config()?.dialect.unwrap_or_default();
             if recorded != requested {
                 anyhow::bail!(
                     "RLM dialect conflict: session records `{}`, requested `{}`",

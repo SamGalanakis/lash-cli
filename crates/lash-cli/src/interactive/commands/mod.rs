@@ -237,7 +237,7 @@ pub(super) async fn handle_builtin_command(
     match cmd {
         command::Command::Exit => Ok(true),
         command::Command::Clear => {
-            let rlm_dialect = session::current_rlm_dialect(runtime);
+            let rlm_dialect = session::current_rlm_dialect(runtime)?;
             session::handle_clear(
                 app,
                 runtime_factory,
@@ -273,10 +273,7 @@ pub(super) async fn handle_builtin_command(
             let context_window = app.usage.context_window;
             let cwd = app.cwd.clone();
             let session_name = app.session_name.clone();
-            let rlm_dialect = runtime.as_ref().and_then(|session| {
-                use lash::rlm::RlmSessionExt as _;
-                session.rlm_config().dialect
-            });
+            let rlm_dialect = session::current_rlm_dialect(runtime)?;
             let session_db_path = logger.db_path().to_string_lossy().to_string();
             app.show_document(info_document(
                 provider,

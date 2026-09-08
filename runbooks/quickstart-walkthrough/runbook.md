@@ -39,6 +39,16 @@ operator surface. That is a scope clarification to record, not a page defect.
    program's "one turn → one settled message" behavior; it is not a line-by-line execution
    of the Rust snippet. Say so.
 
+## Frozen-documentation prerequisite
+
+The pinned Lash revision may intentionally omit `docs/quickstart.html` and
+`scripts/lint_docs.py` (the documentation freeze began in `0d399a4dc`). Check their
+presence at the exact workspace pin before attempting Phase 1. If either is absent,
+record **Abort — documentation prerequisite unavailable**, with the pinned tree and
+deletion commit as evidence. Do not substitute historical or deployed docs, skip the
+lint gate, or award the structural/API score from a snippet compile alone. Resume this
+runbook only when its page and checker are available at the tested pin.
+
 ## Phase 0 — Pre-flight
 
 Per [../RULES.md](../RULES.md). In a Lash repository checkout, read
@@ -71,7 +81,7 @@ scripts/lash-operator.py --provider test
 expect 20 Message · / for commands
 type hello from pty
 key enter
-expect 25 test-provider echo: hello from pty
+expect 25 ■ test-provider echo: hello from pty
 lash-exit 10
 ```
 

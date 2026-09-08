@@ -149,7 +149,7 @@ pub(crate) async fn run_app(
     let mut event_pump = AppEventPump::new();
     let app_tx = event_pump.sender();
     prompt_bridge.set_event_tx(app_tx.clone());
-    let mut snapshot_worker = UiSnapshotWorker::spawn(app_tx.clone());
+    let mut snapshot_worker = UiSnapshotWorker::spawn(app_tx.clone(), runtime_factory.clone());
 
     // Kick off the background `@`-completion file index. Starting it here
     // (rather than lazily on the first `@` keystroke) means the walk is
@@ -525,6 +525,9 @@ pub(crate) async fn run_app(
                     }
 
                     app.finish_turn_from_read_view(&read_view);
+                    for line in crate::util::turn_diagnostic_lines(&done.result) {
+                        push_system_message(&mut app, line);
+                    }
                     app.clear_manual_interrupt_requested();
                     runtime_return_rx = None;
                     cancel_token = None;

@@ -241,8 +241,8 @@ fn prompt_question_wraps_long_path_cleanly() {
     let (response_tx, _response_rx) = mpsc::channel();
     let prompt = PromptState {
         request: PromptRequest::single(
-            "Plan .lash/plans/15d5a2bd-841d-4729-8968-ae7874385e16.md is ready. Exit plan mode now?",
-            vec!["Exit plan mode".into(), "Keep planning".into()],
+            "Review workspace/15d5a2bd-841d-4729-8968-ae7874385e16.md is ready. Exit review mode now?",
+            vec!["Exit review mode".into(), "Keep reviewing".into()],
         )
         .with_optional_note(),
         focus: crate::overlay::PromptFocus::Options,
@@ -264,9 +264,9 @@ fn prompt_question_wraps_long_path_cleanly() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(rendered[0], "Plan .lash/plans/15d5a2bd-841d-4729-89");
-    assert_eq!(rendered[1], "68-ae7874385e16.md is ready. Exit plan");
-    assert_eq!(rendered[2], " mode now?");
+    assert_eq!(rendered[0], "Review workspace/15d5a2bd-841d-4729-89");
+    assert_eq!(rendered[1], "68-ae7874385e16.md is ready. Exit revi");
+    assert_eq!(rendered[2], "ew mode now?");
     assert_eq!(rendered[3], "");
     assert!(rendered.iter().any(|line| line.contains("Choices")));
 }
@@ -276,11 +276,11 @@ fn prompt_panel_renders_before_question_and_choices() {
     let (response_tx, _response_rx) = mpsc::channel();
     let prompt = PromptState {
         request: PromptRequest::single(
-            "Exit plan mode?",
-            vec!["Exit plan mode".into(), "Keep planning".into()],
+            "Review mode?",
+            vec!["Exit review mode".into(), "Keep reviewing".into()],
         )
         .with_optional_note()
-        .with_markdown_panel("PLAN", "# Plan\n\n## Steps\n- First\n- Second"),
+        .with_markdown_panel("REVIEW", "# Review\n\n## Steps\n- First\n- Second"),
         focus: crate::overlay::PromptFocus::Options,
         cursor: 0,
         scroll_offset: 0,
@@ -300,20 +300,20 @@ fn prompt_panel_renders_before_question_and_choices() {
         })
         .collect::<Vec<_>>();
 
-    let plan_idx = rendered
+    let review_idx = rendered
         .iter()
-        .position(|line| line.contains("PLAN"))
-        .expect("plan panel");
+        .position(|line| line.contains("REVIEW"))
+        .expect("review panel");
     let question_idx = rendered
         .iter()
-        .position(|line| line.contains("Exit plan mode?"))
+        .position(|line| line.contains("Review mode?"))
         .expect("question");
     let choices_idx = rendered
         .iter()
         .position(|line| line.contains("Choices"))
         .expect("choices");
 
-    assert!(plan_idx < question_idx);
+    assert!(review_idx < question_idx);
     assert!(question_idx < choices_idx);
     assert!(rendered.iter().any(|line| line.contains("First")));
     assert!(rendered.iter().any(|line| line.contains("Second")));
@@ -324,8 +324,8 @@ fn prompt_panel_renders_before_question_and_choices() {
 fn prompt_panel_strips_redundant_h1_matching_panel_title() {
     let (response_tx, _response_rx) = mpsc::channel();
     let prompt = PromptState {
-        request: PromptRequest::single("Exit plan mode?", vec!["Exit".into()])
-            .with_markdown_panel("PLAN", "# Plan\n\n## Steps\n- First"),
+        request: PromptRequest::single("Review mode?", vec!["Exit".into()])
+            .with_markdown_panel("REVIEW", "# Review\n\n## Steps\n- First"),
         focus: crate::overlay::PromptFocus::Options,
         cursor: 0,
         scroll_offset: 0,
@@ -347,10 +347,10 @@ fn prompt_panel_strips_redundant_h1_matching_panel_title() {
 
     let panel_labels = rendered
         .iter()
-        .filter(|line| line.contains("PLAN"))
+        .filter(|line| line.contains("REVIEW"))
         .collect::<Vec<_>>();
     assert_eq!(panel_labels.len(), 1);
-    assert!(!rendered.iter().any(|line| line.trim() == "Plan"));
+    assert!(!rendered.iter().any(|line| line.trim() == "Review"));
 }
 
 #[test]
@@ -475,18 +475,18 @@ fn activity_block_indents_snippet_preview_under_summary() {
         ActivityKind::GenericTool,
         "preview_text",
         Value::Null,
-        "preview crates/lash/src/plugin_builtin/plan_mode.rs:780-786",
+        "preview crates/lash/src/plugin_builtin/workflow.rs:780-786",
         ActivityStatus::Completed,
         Value::Null,
         0,
     )
     .with_artifact(Some(ActivityArtifact::SnippetPreview(
         SnippetPreviewArtifact {
-            title: Some("plan-modes blocked tool message".into()),
-            path: "crates/lash/src/plugin_builtin/plan_mode.rs".into(),
+            title: Some("workflow blocked tool message".into()),
+            path: "crates/lash/src/plugin_builtin/workflow.rs".into(),
             start_line: 780,
             end_line: 786,
-            content: "if ctx.tool_name != \"plan_exit\" {\n    return Ok(());\n}".into(),
+            content: "if ctx.tool_name != \"workflow_complete\" {\n    return Ok(());\n}".into(),
             render_mode: SnippetRenderMode::Code,
             language: Some("rs".into()),
         },
@@ -504,23 +504,23 @@ fn activity_block_indents_snippet_preview_under_summary() {
         .collect::<Vec<_>>();
 
     assert!(rendered.iter().any(|line| {
-        line.starts_with("• preview crates/lash/src/plugin_builtin/plan_mode.rs:780-786")
+        line.starts_with("• preview crates/lash/src/plugin_builtin/workflow.rs:780-786")
     }));
     assert!(
         rendered
             .iter()
-            .any(|line| line.starts_with("    plan-modes blocked tool message"))
+            .any(|line| line.starts_with("    workflow blocked tool message"))
     );
     assert!(
         !rendered.iter().any(|line| {
-            line.starts_with("    File · crates/lash/src/plugin_builtin/plan_mode.rs:780-786")
+            line.starts_with("    File · crates/lash/src/plugin_builtin/workflow.rs:780-786")
         }),
         "metadata line should be suppressed when custom title is present"
     );
     assert!(
         rendered
             .iter()
-            .any(|line| line.starts_with("    780 │ if ctx.tool_name != \"plan_exit\" {"))
+            .any(|line| line.starts_with("    780 │ if ctx.tool_name != \"workflow_complete\" {"))
     );
 }
 
@@ -865,10 +865,10 @@ fn live_tool_output_without_running_activity_renders_as_tail_block() {
 #[test]
 fn plugin_panel_renders_as_section_header_without_box() {
     let blocks = vec![UiTimelineItem::PluginPanel(crate::app::PluginPanelBlock {
-        plugin_id: "plan_mode".into(),
+        plugin_id: "test_plugin".into(),
         key: "panel".into(),
-        title: "PLAN".into(),
-        content: "Path: `.lash/plans/demo.md`".into(),
+        title: "DETAILS".into(),
+        content: "Path: `workspace/demo.md`".into(),
     })];
 
     let rendered = render_block(&blocks, 0, 1, 72, 20)
@@ -881,92 +881,14 @@ fn plugin_panel_renders_as_section_header_without_box() {
         })
         .collect::<Vec<_>>();
 
-    assert!(rendered.iter().any(|line| line.contains("PLAN")));
+    assert!(rendered.iter().any(|line| line.contains("DETAILS")));
     assert!(
         rendered
             .iter()
-            .any(|line| line.contains("Path: .lash/plans/demo.md"))
+            .any(|line| line.contains("Path: workspace/demo.md"))
     );
     assert!(!rendered.iter().any(|line| line.contains("┌")));
     assert!(!rendered.iter().any(|line| line.contains("└")));
-}
-
-#[test]
-fn plan_dock_renders_as_checklist_with_dim_plan_header() {
-    use crate::app::{App, PlanDockItem, PlanDockItemStatus, PlanDockState};
-    let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    app.plan_dock = Some(PlanDockState {
-        title: "PLAN".into(),
-        meta: None,
-        items: vec![
-            PlanDockItem {
-                text: "already done".into(),
-                status: PlanDockItemStatus::Done,
-            },
-            PlanDockItem {
-                text: "in flight".into(),
-                status: PlanDockItemStatus::Active,
-            },
-            PlanDockItem {
-                text: "not yet".into(),
-                status: PlanDockItemStatus::Pending,
-            },
-        ],
-    });
-
-    let lines = crate::render::plan_dock_lines_snapshot(&app, 80)
-        .expect("plan dock should render when items are present");
-    let text: Vec<String> = lines
-        .iter()
-        .map(|line| {
-            line.spans
-                .iter()
-                .map(|span| span.content.as_ref())
-                .collect::<String>()
-        })
-        .collect();
-
-    // Blank gutter + header row + 3 items = 5 rows. No scribe rule.
-    assert_eq!(
-        text.len(),
-        5,
-        "expected 1 gutter + 1 header + 3 items, got {text:?}"
-    );
-    assert!(
-        text[0].trim().is_empty(),
-        "row 0 should be the blank gutter"
-    );
-    assert!(text[1].contains("Plan"));
-    assert!(text[2].contains("✓") && text[2].contains("already done"));
-    assert!(text[3].contains("▶") && text[3].contains("in flight"));
-    assert!(text[4].contains("□") && text[4].contains("not yet"));
-    assert!(
-        !text.iter().any(|line| line.contains("─")),
-        "no scribe rule expected, got {text:?}",
-    );
-}
-
-#[test]
-fn plan_dock_trailing_height_includes_gutter_plus_items() {
-    use crate::app::{App, PlanDockItem, PlanDockItemStatus, PlanDockState};
-    let mut app = App::new("test-model".into(), "test".into(), "test-session-id".into());
-    assert_eq!(crate::render::plan_dock_trailing_height(&app), 0);
-
-    app.plan_dock = Some(PlanDockState {
-        title: String::new(),
-        meta: None,
-        items: vec![
-            PlanDockItem {
-                text: "a".into(),
-                status: PlanDockItemStatus::Pending,
-            },
-            PlanDockItem {
-                text: "b".into(),
-                status: PlanDockItemStatus::Pending,
-            },
-        ],
-    });
-    assert_eq!(crate::render::plan_dock_trailing_height(&app), 4);
 }
 
 #[test]
@@ -1078,7 +1000,7 @@ fn snippet_preview_renders_markdown_list_snippet_without_literal_emphasis_marker
 fn snippet_preview_wraps_long_markdown_bullets_to_viewport_width() {
     let preview = SnippetPreviewArtifact {
         title: Some("Plan excerpt".into()),
-        path: ".lash/plans/demo.md".into(),
+        path: "workspace/demo.md".into(),
         start_line: 1,
         end_line: 4,
         content: "## Goal\n\n- Complete a full spring-cleaning pass in two phases: first remove dead or stale things, then simplify what remains.".into(),
