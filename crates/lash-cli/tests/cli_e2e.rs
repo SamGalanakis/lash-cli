@@ -8,6 +8,188 @@ use lash_debug_cli_harness::{
 };
 
 #[test]
+fn charge_safety_is_reapplied_on_fresh_and_resumed_autonomous_sessions() {
+    let temp = tempfile::tempdir().expect("temp lash home");
+    write_test_provider_config(temp.path(), "charge-safety");
+    write_test_model_catalog(temp.path());
+    let run = |resume: Option<&str>| {
+        let mut command = Command::new(lash_bin());
+        command
+            .env("LASH_HOME", temp.path())
+            .env("LASH_LOG", "error")
+            .args([
+                "--model",
+                "test/cli-e2e-model",
+                "--print",
+                "check charge policy",
+            ]);
+        if let Some(session) = resume {
+            command.args(["--resume", session]);
+        }
+        run_lash_with_timeout(&mut command, Duration::from_secs(30))
+    };
+    let refused = run(None);
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("unsafe_retry_after_output_started"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("billed tokens 0 (reported or defaulted"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("partial output present"), "{stderr}");
+    assert!(!String::from_utf8_lossy(&refused.stdout).contains("PRIVATE PARTIAL"));
+    assert!(!stderr.contains("PRIVATE PARTIAL"));
+    let session = std::fs::read_dir(temp.path().join("sessions"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .find_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.strip_suffix(".ui.json"))
+                .map(str::to_owned)
+        })
+        .unwrap();
+    let path = temp.path().join("config.json");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    config["charge_safety"] = serde_json::json!({"mode": "accept_duplicate_billing",
+        "max_unsafe_retries": 1, "max_duplicate_cost_tokens": 100});
+    std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+    for resume in [Some(session.as_str()), None] {
+        let retried = run(resume);
+        assert!(
+            retried.status.success(),
+            "{}",
+            String::from_utf8_lossy(&retried.stderr)
+        );
+        assert!(String::from_utf8_lossy(&retried.stdout).contains("charge-safe retry completed"));
+    }
+    config.as_object_mut().unwrap().remove("charge_safety");
+    std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+    let refused_again = run(Some(&session));
+    assert!(!refused_again.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused_again.stderr)
+            .contains("unsafe_retry_after_output_started")
+    );
+}
+
+#[test]
+fn old_home_preflight_refuses_without_mutation_then_reset_clears_all_runtime_data() {
+    use lash_sqlite_store::SqliteDatabase;
+    use std::io::Write as _;
+    let temp = tempfile::tempdir().expect("temp lash home");
+    let store = temp.path().join("store");
+    std::fs::create_dir_all(&store).unwrap();
+    std::fs::create_dir_all(temp.path().join("sessions")).unwrap();
+    std::fs::write(temp.path().join("sessions/old.ui.json"), "preserved roster").unwrap();
+    write_test_provider_config(temp.path(), "standard-slow-echo");
+    write_test_model_catalog(temp.path());
+    let config = std::fs::read(temp.path().join("config.json")).unwrap();
+    let mut fixtures = Vec::new();
+    for (file, database, bumps) in [
+        ("durable-core.db", SqliteDatabase::DurableCore, 5),
+        ("processes.db", SqliteDatabase::ProcessRegistry, 6),
+        ("triggers.db", SqliteDatabase::Triggers, 1),
+        ("effects.db", SqliteDatabase::EffectReplay, 2),
+    ] {
+        // Reconstruct the previous pin's versions from the reviewed bump counts.
+        let old = database.expected_version() - bumps;
+        let path = store.join(file);
+        assert!(Command::new("python3").args(["-c",
+            "import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('PRAGMA user_version='+sys.argv[2]); c.execute('CREATE TABLE preserved(value TEXT)'); c.execute(\"INSERT INTO preserved VALUES ('old home')\"); c.commit(); c.close()"])
+            .arg(&path).arg(old.to_string()).status().unwrap().success());
+        fixtures.push((path.clone(), std::fs::read(&path).unwrap(), database, old));
+    }
+    let refused = run_lash_with_timeout(
+        Command::new(lash_bin())
+            .env("LASH_HOME", temp.path())
+            .args(["--info", "--model", "test/cli-e2e-model"]),
+        Duration::from_secs(20),
+    );
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    for (path, bytes, database, old) in fixtures {
+        assert!(
+            stderr.contains(&format!(
+                "schema `{}` is at version {} and this build requires {}",
+                database.name(),
+                old,
+                database.expected_version()
+            )),
+            "{stderr}"
+        );
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            bytes,
+            "preflight mutated an old database"
+        );
+    }
+    assert!(stderr.contains("whole-home"));
+    assert!(stderr.contains("lash --reset"));
+    let mut reset = Command::new(lash_bin())
+        .env("LASH_HOME", temp.path())
+        .arg("--reset")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    reset.stdin.take().unwrap().write_all(b"y\n").unwrap();
+    let output = reset.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(!store.exists());
+    assert!(!temp.path().join("sessions").exists());
+    assert_eq!(
+        std::fs::read(temp.path().join("config.json")).unwrap(),
+        config
+    );
+    let ready = run_lash_with_timeout(
+        Command::new(lash_bin())
+            .env("LASH_HOME", temp.path())
+            .args(["--info", "--model", "test/cli-e2e-model"]),
+        Duration::from_secs(20),
+    );
+    assert!(
+        ready.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ready.stderr)
+    );
+}
+
+#[test]
+fn published_documentation_versions_follow_runtime_exports() {
+    for page in ["index.html", "architecture.html"] {
+        let text = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../docs")
+                .join(page),
+        )
+        .unwrap();
+        for (label, version) in [
+            (
+                "session schema",
+                lash_sqlite_store::SESSION_SCHEMA_VERSION.to_string(),
+            ),
+            ("trace schema", lash_trace::TRACE_SCHEMA_VERSION.to_string()),
+            (
+                "remote protocol",
+                lash::remote::REMOTE_PROTOCOL_VERSION.to_string(),
+            ),
+        ] {
+            assert!(
+                text.contains(&format!("{label} <code>{version}</code>")),
+                "{page}: {label} is stale"
+            );
+        }
+    }
+}
+
+#[test]
 fn cli_short_rlm_mode_runs_subagent_spawn_with_test_provider() {
     let temp = tempfile::tempdir().expect("temp lash home");
     write_test_provider_config(temp.path(), "rlm-subagent-smoke");

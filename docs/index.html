@@ -186,7 +186,7 @@
             <article class="panel">
               <h3>Admin</h3>
               <dl class="def-list">
-                <dt><code>--reset</code></dt><dd>Delete <code>~/.lash/store/</code> and the host session roster under <code>~/.lash/sessions/</code>, preserving provider configuration.</dd>
+                <dt><code>--reset</code></dt><dd>Perform a whole-home runtime-data reset: delete all databases and attachments in <code>~/.lash/store/</code> and the host session roster under <code>~/.lash/sessions/</code>, preserving provider configuration.</dd>
                 <dt><code>--info</code></dt><dd>Print current config / runtime info and exit.</dd>
                 <dt><code>--check-update</code> / <code>--update</code></dt><dd>Check / install the latest release.</dd>
                 <dt><code>--export &lt;session-id&gt;</code></dt><dd>Export a session from the unified Lash catalog. Combine with <code>--export-format html|json</code>, <code>--export-trace &lt;jsonl&gt;</code>, and <code>--export-out &lt;path&gt;</code>.</dd>
@@ -234,6 +234,7 @@ $ lash --print "Investigate the latest test failure." \
           </div>
           <pre data-lang="json"><code>{
   "active_provider": "openai",
+  "charge_safety": { "mode": "require_guarantee" },
   "execution_mode": "rlm",
   "rlm_dialect": "typescript",
   "providers": {
@@ -273,6 +274,7 @@ $ lash --print "Investigate the latest test failure." \
               <tbody>
                 <tr><td><code>active_provider</code></td><td>string</td><td>Key of the currently active provider; must exist in <code>providers</code>.</td></tr>
                 <tr><td><code>providers</code></td><td>map</td><td>Per-provider credentials and metadata, keyed by provider kind. Shared provider tuning lives under <code>options</code>, including <code>cache_retention</code> (<code>none</code> | <code>short</code> | <code>long</code>), <code>max_output_tokens</code>, and <code>reliability.response_start_timeout</code> in milliseconds. Omit the response-start timeout or set it to <code>0</code> to retain the legacy <code>min(request, chunk)</code> bound.</td></tr>
+                <tr><td><code>charge_safety</code></td><td>object</td><td>Live host retry policy. Defaults to <code>{"mode":"require_guarantee"}</code> when unset. Applied on every creation and reopen, including <code>/clear</code>, <code>/resume</code>, autonomous runs, and native queued work; it is excluded from durable session policy serialization.</td></tr>
                 <tr><td><code>execution_mode</code></td><td>string</td><td>Default mode for fresh sessions: <code>standard</code> or <code>rlm</code>.</td></tr>
                 <tr><td><code>rlm_dialect</code></td><td>string</td><td>Default language pinned to fresh RLM sessions: <code>lashlang</code> or <code>typescript</code>.</td></tr>
                 <tr><td><code>auxiliary_secrets</code></td><td>object</td><td>Secrets for non-LLM services. Currently <code>tavily_api_key</code>.</td></tr>
@@ -282,6 +284,19 @@ $ lash --print "Investigate the latest test failure." \
               </tbody>
             </table>
           </div>
+        </div>
+
+        <div class="section" id="retry-charge-safety">
+          <div class="section-header"><h2>Retries &amp; charge safety</h2></div>
+          <p>By default, Lash requires a provider idempotency or resume guarantee before retrying a generation that may already have been billed. To accept bounded duplicate billing, set this top-level config key:</p>
+          <pre data-lang="json"><code>"charge_safety": {
+  "mode": "accept_duplicate_billing",
+  "max_unsafe_retries": 2,
+  "max_duplicate_cost_tokens": 2000
+}</code></pre>
+          <p>Lash clamps <code>max_unsafe_retries</code> to at most five per logical LLM call. The optional token bound counts input, output, cache-read, and cache-write tokens already billed for the abandoned generation. Missing partial usage counts as zero toward this bound, so it cannot cap unknown charges; the retry-count limit still applies. Omit <code>max_duplicate_cost_tokens</code> or set it to <code>null</code> for no token bound. Nonretryable failures remain nonretryable. This is configuration, with no CLI flag.</p>
+          <p>Provider retry settings live under <code>providers.&lt;kind&gt;.options.reliability.retry</code>. <code>ProviderRetryPolicy.jitter_ms</code> defaults to <code>500</code> milliseconds of per-attempt additive random jitter; <code>0</code> disables it. <code>retry_after_cap_ms</code> defaults to <code>60000</code> (60 seconds). A longer server <code>Retry-After</code> now refuses immediately instead of sleeping a truncated delay.</p>
+          <p>Failed-turn diagnostics show the charge refusal code, billed tokens, and whether partial output exists. Zero usage is labeled as reported or defaulted because the evidence does not distinguish missing usage from a reported zero. Partial text stays out of the terminal timeline. Advisory issues render as warnings, and omitted tool records disclose their counts. JSON/RPC finish records also carry <code>failure_evidence</code> and <code>omitted</code>.</p>
         </div>
 
         <div class="section" id="environment-variables">
@@ -316,8 +331,9 @@ $ lash --print "Investigate the latest test failure." \
           <div class="section-header">
             <h2>Resume &amp; Fork</h2>
             <p>Every session has a UUID and normally a generated human-readable name. <code>--resume &lt;id_or_name&gt;</code> accepts either; legacy <code>.db</code> filenames are refused as incompatible. Without an argument, <code>/resume</code> opens an interactive picker showing the 50 most recent live root sessions from Lash's unified catalog, sorted by recency. The host roster contributes display metadata only, so catalog-only sessions remain visible with fallback labels. The picker hides zero-turn sessions when any non-empty session exists; direct <code>/resume &lt;id-or-name&gt;</code> may still target any session.</p>
-            <p>The current durable compatibility markers are session schema <code>45</code>, trace schema <code>10</code>, and remote protocol <code>49</code>. <code>lash --version</code> and <code>/info</code> report them.</p>
+            <p>The current durable compatibility markers are session schema <code>50</code>, trace schema <code>18</code>, and remote protocol <code>54</code>. <code>lash --version</code> and <code>/info</code> report them.</p>
           </div>
+          <p>This pin is a forward-only, whole-home runtime-data cutover. Older session, process, trigger, and effect-replay databases are refused before provider startup; there is no migration chain. Retain or export needed data with the old compatible binary first. Then run <code>lash --reset</code> and confirm to remove the entire runtime store and session roster together, preserving provider configuration. Never reset databases piecemeal. Old trace files need a compatible reader; remote peers need matching protocol versions.</p>
           <p><code>/fork</code> branches the current session at the current message and opens the fork in a new terminal window. Lash resolves the launcher from the running executable and falls back to finding <code>lash</code> on <code>$PATH</code> if that binary isn't launchable. The launched fork runs <code>lash --resume &lt;new-session-id&gt;</code> in the new terminal.</p>
         </div>
   </main>

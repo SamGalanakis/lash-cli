@@ -12,7 +12,9 @@ pub(super) async fn probe_runtime_store() -> anyhow::Result<lash::preflight::Pre
     let report =
         lash::preflight::probe_store(&handle, lash::preflight::PreflightOptions::summary()).await?;
     if let Some(message) = report.refusal_message() {
-        anyhow::bail!(message);
+        anyhow::bail!(
+            "{message}\nThis build requires a whole-home runtime-data cutover. Back up or export with the old compatible binary, then run `lash --reset` to clear all runtime databases and the session roster together. Do not reset individual databases."
+        );
     }
     Ok(report)
 }
@@ -38,7 +40,7 @@ pub(super) async fn handle_early_exit_flags(args: &Args) -> anyhow::Result<bool>
     Ok(false)
 }
 
-/// `--reset`: confirm, then delete the unified store and host session roster.
+/// `--reset`: confirm a whole-home runtime-data reset, preserving configuration.
 fn run_reset() -> anyhow::Result<()> {
     use std::io::Write;
 
@@ -57,7 +59,9 @@ fn run_reset() -> anyhow::Result<()> {
     eprintln!();
     eprintln!("  {SODIUM}{BOLD}/ reset{RESET}");
     eprintln!();
-    eprintln!("  {ERR}This will permanently delete Lash runtime data:{RESET}");
+    eprintln!(
+        "  {ERR}This whole-home reset will permanently delete all Lash runtime databases and the session roster:{RESET}"
+    );
     eprintln!();
     eprintln!(
         "    {ASH_TEXT}durable store         {CHALK}{}{RESET}",
