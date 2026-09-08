@@ -511,7 +511,9 @@ impl App {
                 // `CodeBlockStarted`. On failure, surface the error right after
                 // it so a failed block isn't silently swallowed. Observations
                 // are intentionally not rendered here.
-                if let Some(message) = error.filter(|_| !success) {
+                if let Some(failure) = error.filter(|_| !success) {
+                    tracing::warn!(kind = ?failure.kind, message = %failure.message, "cell failed");
+                    let message = format!("{:?}: {}", failure.kind, failure.message);
                     self.finalize_live_markdown();
                     let changed_idx = self.timeline.len();
                     let invalidate_from = self.append_invalidation_start();

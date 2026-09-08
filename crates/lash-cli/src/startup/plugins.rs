@@ -241,8 +241,8 @@ mod tests {
         let template = layer.template.as_ref().expect("cli prompt template");
         let contributions = layer
             .slots
-            .values()
-            .flat_map(|slot| slot.contributions.iter())
+            .iter()
+            .flat_map(|(key, slot)| slot.contributions.iter().map(move |body| (key, body)))
             .collect::<Vec<_>>();
 
         let execution = template
@@ -259,8 +259,8 @@ mod tests {
             )
         }));
         assert!(
-            !contributions.iter().any(|contribution| {
-                contribution.slot == PromptSlot::Execution
+            !contributions.iter().any(|(slot, contribution)| {
+                **slot == PromptSlot::Execution
                     && contribution.title.as_deref() == Some("RLM Response Finalization")
             }),
             "RLM response-shape guidance belongs to the protocol execution section"
@@ -272,11 +272,11 @@ mod tests {
         let layer = cli_prompt_config(false, &ExecutionMode::Standard);
         let contributions = layer
             .slots
-            .values()
-            .flat_map(|slot| slot.contributions.iter())
+            .iter()
+            .flat_map(|(key, slot)| slot.contributions.iter().map(move |body| (key, body)))
             .collect::<Vec<_>>();
 
-        assert!(!contributions.iter().any(|contribution| {
+        assert!(!contributions.iter().any(|(_, contribution)| {
             contribution.title.as_deref() == Some("RLM Response Finalization")
         }));
     }
@@ -287,8 +287,8 @@ mod tests {
         let template = layer.template.as_ref().expect("cli prompt template");
         let contributions = layer
             .slots
-            .values()
-            .flat_map(|slot| slot.contributions.iter())
+            .iter()
+            .flat_map(|(key, slot)| slot.contributions.iter().map(move |body| (key, body)))
             .collect::<Vec<_>>();
 
         assert!(template.sections.iter().any(|section| {
@@ -311,12 +311,11 @@ mod tests {
                 )
             })
         }));
-        assert!(contributions.iter().any(|contribution| {
-            contribution.slot == PromptSlot::Intro
-                && contribution.content.as_ref() == CLI_AUTONOMOUS_INTRO
+        assert!(contributions.iter().any(|(slot, contribution)| {
+            **slot == PromptSlot::Intro && contribution.content.as_ref() == CLI_AUTONOMOUS_INTRO
         }));
-        assert!(contributions.iter().any(|contribution| {
-            contribution.slot == PromptSlot::Execution
+        assert!(contributions.iter().any(|(slot, contribution)| {
+            **slot == PromptSlot::Execution
                 && contribution.content.as_ref() == CLI_AUTONOMOUS_EXECUTION
         }));
     }

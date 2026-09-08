@@ -46,7 +46,7 @@ impl App {
             plugin_mode_indicators,
             plan_dock,
             processes,
-            selected_process_id,
+            selected_process_ref,
             activity_state,
             ui_activity_journal,
             pending_ui_activity_records,
@@ -92,7 +92,7 @@ impl App {
         plugin_mode_indicators.clear();
         *plan_dock = None;
         processes.clear();
-        *selected_process_id = None;
+        *selected_process_ref = None;
         activity_state.reset();
         *ui_activity_journal = UiActivityJournal::default();
         pending_ui_activity_records.clear();

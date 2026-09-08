@@ -384,9 +384,11 @@ mod tests {
         app.update_processes(vec![crate::app::ProcessSnapshot {
             view: lash::process::ProcessHandleView::new(
                 "process-1",
+                lash::process::ProcessIncarnation::from_registration_sequence(1),
                 lash::process::ProcessIdentity::new("lashlang").with_label(Some("responder")),
                 lash::process::ProcessStatus::Running,
             ),
+            last_event_sequence: 1,
             updated_at_ms: None,
         }]);
         sync_chrome_turn_status(&app);
@@ -427,6 +429,7 @@ mod tests {
         app.update_processes(vec![crate::app::ProcessSnapshot {
             view: lash::process::ProcessHandleView::new(
                 "process-1",
+                lash::process::ProcessIncarnation::from_registration_sequence(1),
                 lash::process::ProcessIdentity::new("lashlang")
                     .with_label(Some("responder"))
                     .with_definition(Some(
@@ -440,6 +443,7 @@ mod tests {
                     )),
                 lash::process::ProcessStatus::Running,
             ),
+            last_event_sequence: 1,
             updated_at_ms: None,
         }]);
         app.select_next_process();

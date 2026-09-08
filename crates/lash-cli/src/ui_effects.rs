@@ -222,6 +222,8 @@ pub(crate) fn observed_to_process_snapshot(
 ) -> crate::app::ProcessSnapshot {
     let lash::process::ObservedProcess {
         process_id,
+        incarnation,
+        last_event_sequence,
         graph_key: _,
         kind: _,
         lifecycle,
@@ -246,8 +248,9 @@ pub(crate) fn observed_to_process_snapshot(
         label: _,
     } = process;
     crate::app::ProcessSnapshot {
-        view: lash::process::ProcessHandleView::new(process_id, identity, lifecycle),
+        view: lash::process::ProcessHandleView::new(process_id, incarnation, identity, lifecycle),
         updated_at_ms: Some(updated_at_ms),
+        last_event_sequence,
     }
 }
 
@@ -262,7 +265,7 @@ pub(crate) async fn collect_ui_snapshot(
 ) -> crate::event::UiSnapshotResult {
     let started = std::time::Instant::now();
     let mut diagnostics = Vec::new();
-    let processes = match session.processes().list_all().await {
+    let processes = match session.admin().processes().list_all().await {
         Ok(tasks) => Some(
             tasks
                 .into_iter()

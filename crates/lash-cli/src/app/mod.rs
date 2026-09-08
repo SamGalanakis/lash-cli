@@ -48,6 +48,7 @@ const PROCESS_RETENTION: std::time::Duration = std::time::Duration::from_secs(10
 pub(crate) struct ProcessSnapshot {
     pub view: ProcessHandleView,
     pub updated_at_ms: Option<u64>,
+    pub last_event_sequence: u64,
 }
 
 fn process_updated_within_retention(updated_at_ms: u64, now_ms: u64) -> bool {
@@ -130,6 +131,8 @@ pub struct ToastState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessView {
     pub process_id: String,
+    pub incarnation: lash::process::ProcessIncarnation,
+    pub last_event_sequence: u64,
     pub kind: String,
     pub label: String,
     pub definition: Option<String>,
@@ -140,8 +143,13 @@ pub struct ProcessView {
 }
 
 impl ProcessView {
+    pub fn key(&self) -> lash::process::ProcessRef {
+        lash::process::ProcessRef::new(self.process_id.clone(), self.incarnation)
+    }
+
     fn from_summary(
         summary: ProcessHandleView,
+        last_event_sequence: u64,
         first_seen: std::time::Instant,
         status_duration: Option<std::time::Duration>,
         transient_until: Option<std::time::Instant>,
@@ -159,6 +167,8 @@ impl ProcessView {
         });
         Self {
             process_id: summary.process_id.to_string(),
+            incarnation: summary.incarnation,
+            last_event_sequence,
             kind,
             label,
             definition,
@@ -649,7 +659,7 @@ pub struct App {
     /// Snapshot of processes registered for this session.
     pub processes: Vec<ProcessView>,
     /// Focused background process row in the trailing process dock.
-    pub selected_process_id: Option<String>,
+    pub selected_process_ref: Option<lash::process::ProcessRef>,
     /// UI extension registry used for slash-command completion and host actions.
     ui_extensions: Arc<TuiExtensions>,
     /// Shared state for the lash-cli chrome UI extension. The scratch-tui
@@ -829,13 +839,13 @@ impl App {
         let before_tasks = self.processes.len();
         self.processes.retain(ProcessView::is_visible);
         if self.processes.len() != before_tasks {
-            if self.selected_process_id.as_deref().is_some_and(|selected| {
+            if self.selected_process_ref.as_ref().is_some_and(|selected| {
                 !self
                     .processes
                     .iter()
-                    .any(|process| process.process_id == selected)
+                    .any(|process| process.key() == *selected)
             }) {
-                self.selected_process_id = None;
+                self.selected_process_ref = None;
             }
             self.invalidate_height_cache();
             self.dirty = true;
@@ -927,7 +937,7 @@ impl App {
             plugin_mode_indicators: BTreeMap::new(),
             plan_dock: None,
             processes: Vec::new(),
-            selected_process_id: None,
+            selected_process_ref: None,
             ui_extensions: Arc::new(TuiExtensions::default()),
             chrome_state: Arc::new(Mutex::new(crate::chrome_ui::ChromeUiState::default())),
             cwd,
@@ -1072,19 +1082,29 @@ impl App {
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_millis() as u64);
-        let previous: HashMap<String, ProcessView> = self
+        let previous: HashMap<lash::process::ProcessRef, ProcessView> = self
             .processes
             .iter()
             .cloned()
-            .map(|task| (task.process_id.clone(), task))
+            .map(|task| (task.key(), task))
             .collect();
         let mut next = Vec::new();
         for snapshot in snapshots {
             let ProcessSnapshot {
                 view: task,
                 updated_at_ms,
+                last_event_sequence,
             } = snapshot;
-            let previous_process = previous.get(&task.process_id);
+            let previous_process = previous.get(&lash::process::ProcessRef::new(
+                task.process_id.clone(),
+                task.incarnation,
+            ));
+            if let Some(previous_process) = previous_process
+                && last_event_sequence < previous_process.last_event_sequence
+            {
+                next.push(previous_process.clone());
+                continue;
+            }
             let status = task.status.is_terminal().then_some(task.status);
             let first_seen = previous_process.map(|item| item.first_seen).unwrap_or(now);
             let status_duration = if status.is_some() {
@@ -1109,16 +1129,17 @@ impl App {
             };
             next.push(ProcessView::from_summary(
                 task,
+                last_event_sequence,
                 first_seen,
                 status_duration,
                 transient_until,
             ));
         }
         next.retain(ProcessView::is_visible);
-        if let Some(selected) = self.selected_process_id.as_deref()
-            && !next.iter().any(|process| process.process_id == selected)
+        if let Some(selected) = self.selected_process_ref.as_ref()
+            && !next.iter().any(|process| process.key() == *selected)
         {
-            self.selected_process_id = None;
+            self.selected_process_ref = None;
             self.dirty = true;
         }
         if self.processes != next {
@@ -1158,14 +1179,14 @@ impl App {
     }
 
     pub fn selected_process(&self) -> Option<&ProcessView> {
-        let selected = self.selected_process_id.as_deref()?;
+        let selected = self.selected_process_ref.as_ref()?;
         self.processes
             .iter()
-            .find(|process| process.process_id == selected)
+            .find(|process| process.key() == *selected)
     }
 
     pub fn clear_process_selection(&mut self) {
-        if self.selected_process_id.take().is_some() {
+        if self.selected_process_ref.take().is_some() {
             self.dirty = true;
         }
     }
@@ -1183,10 +1204,10 @@ impl App {
             self.clear_process_selection();
             return false;
         }
-        let current = self.selected_process_id.as_deref().and_then(|selected| {
+        let current = self.selected_process_ref.as_ref().and_then(|selected| {
             self.processes
                 .iter()
-                .position(|process| process.process_id == selected)
+                .position(|process| process.key() == *selected)
         });
         let len = self.processes.len() as isize;
         let next = match current {
@@ -1194,7 +1215,7 @@ impl App {
             None if delta < 0 => self.processes.len() - 1,
             None => 0,
         };
-        self.selected_process_id = Some(self.processes[next].process_id.clone());
+        self.selected_process_ref = Some(self.processes[next].key());
         self.dirty = true;
         true
     }
@@ -1253,11 +1274,45 @@ mod process_retention_tests {
         ProcessSnapshot {
             view: ProcessHandleView::new(
                 process_id,
+                lash::process::ProcessIncarnation::from_registration_sequence(1),
                 lash::process::ProcessIdentity::new("subagent").with_label(Some("spawn")),
                 status,
             ),
             updated_at_ms,
+            last_event_sequence: 1,
         }
+    }
+
+    #[test]
+    fn reused_process_id_does_not_inherit_selection_or_terminal_retention() {
+        let mut app = App::new("model".into(), "provider".into(), "session".into());
+        app.update_processes(vec![process(
+            "reused",
+            ProcessStatus::Running,
+            Some(now_ms()),
+        )]);
+        app.select_next_process();
+        let mut replacement = process("reused", ProcessStatus::Completed, Some(0));
+        replacement.view.incarnation =
+            lash::process::ProcessIncarnation::from_registration_sequence(2);
+        app.update_processes(vec![replacement]);
+        assert!(app.processes.is_empty());
+        assert!(app.selected_process_ref.is_none());
+    }
+
+    #[test]
+    fn stale_snapshot_does_not_regress_same_incarnation() {
+        let mut app = App::new("model".into(), "provider".into(), "session".into());
+        let mut newer = process("task", ProcessStatus::Completed, Some(now_ms()));
+        newer.last_event_sequence = 3;
+        app.update_processes(vec![newer]);
+        app.update_processes(vec![process(
+            "task",
+            ProcessStatus::Running,
+            Some(now_ms()),
+        )]);
+        assert_eq!(app.processes[0].status, ProcessStatus::Completed);
+        assert_eq!(app.processes[0].last_event_sequence, 3);
     }
 
     fn now_ms() -> u64 {
@@ -1324,6 +1379,6 @@ mod process_retention_tests {
         app.on_tick();
 
         assert!(app.processes.is_empty());
-        assert!(app.selected_process_id.is_none());
+        assert!(app.selected_process_ref.is_none());
     }
 }

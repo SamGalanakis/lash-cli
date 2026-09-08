@@ -53,7 +53,7 @@ async fn activate_opened_session(
     let Some(session) = runtime.as_ref() else {
         return Err("opened session was not installed".to_string());
     };
-    app.set_rlm_dialect(current_rlm_dialect(runtime));
+    app.set_rlm_dialect(current_rlm_dialect(runtime).map_err(|err| err.to_string())?);
     crate::startup::session::refresh_tool_catalog_and_wait(
         session,
         "interactive session open",
@@ -97,11 +97,14 @@ fn fallback_policy_for_session_switch(
 
 pub(super) fn current_rlm_dialect(
     runtime: &Option<LashSession>,
-) -> Option<crate::execution_settings::RlmDialect> {
+) -> anyhow::Result<Option<crate::execution_settings::RlmDialect>> {
     use lash::rlm::RlmSessionExt as _;
     runtime
         .as_ref()
-        .and_then(|session| session.rlm_config().dialect)
+        .map(|session| session.rlm_config().map(|config| config.dialect))
+        .transpose()
+        .map(Option::flatten)
+        .map_err(Into::into)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -142,7 +145,7 @@ pub(super) async fn handle_clear(
     let Some(session) = runtime.as_ref() else {
         return Err(anyhow::anyhow!("opened session was not installed"));
     };
-    app.set_rlm_dialect(current_rlm_dialect(runtime));
+    app.set_rlm_dialect(current_rlm_dialect(runtime)?);
     if let Some(rt) = runtime.as_ref() {
         crate::startup::session::refresh_tool_catalog_and_wait(
             rt,
@@ -335,7 +338,7 @@ pub(crate) async fn switch_to_session_identifier(
             identifier,
             policy,
             *current_execution_mode,
-            current_rlm_dialect(runtime),
+            current_rlm_dialect(runtime)?,
         )
         .await?;
     activate_opened_session(

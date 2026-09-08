@@ -227,6 +227,8 @@ fn json_finish_record(
         "usage": turn.usage,
         "children_usage": turn.children_usage,
         "errors": turn.errors,
+        "failure_evidence": turn.failure_evidence,
+        "omitted": turn.omitted,
         "execution": turn.execution,
         "tool_calls": tool_calls,
     });
@@ -313,6 +315,9 @@ impl AutonomousOutput {
     fn finish_success(&mut self, turn: &lash::TurnReport, cancelled: bool) -> anyhow::Result<()> {
         match self {
             AutonomousOutput::Print(renderer) => {
+                for line in crate::util::turn_diagnostic_lines(turn) {
+                    eprintln!("{line}");
+                }
                 if !turn.assistant_output.safe_text.is_empty() {
                     renderer.finish_output(&turn.assistant_output.safe_text);
                 } else if let Some(rendered) = renderer.rendered_plugin_output() {
@@ -339,8 +344,8 @@ impl AutonomousOutput {
     fn finish_failure(&mut self, turn: &lash::TurnReport, cancelled: bool) -> anyhow::Result<()> {
         match self {
             AutonomousOutput::Print(_) => {
-                for issue in &turn.errors {
-                    eprintln!("error: {}", issue.message);
+                for line in crate::util::turn_diagnostic_lines(turn) {
+                    eprintln!("{line}");
                 }
                 if turn.errors.is_empty() {
                     eprintln!("error: autonomous turn failed");
@@ -683,6 +688,8 @@ async fn run_rpc(
                         "outcome": done.result.outcome,
                         "usage": done.result.usage,
                         "errors": done.result.errors,
+                        "failure_evidence": done.result.failure_evidence,
+                        "omitted": done.result.omitted,
                     },
                 }))?;
             }
@@ -757,9 +764,50 @@ mod tests {
                 duration_ms: 42,
             },
             errors: Vec::new(),
+            failure_evidence: Vec::new(),
+            omitted: None,
             acceptance: None,
             cancel_input_outcome: Default::default(),
         }
+    }
+
+    #[test]
+    fn advisory_and_failure_evidence_diagnostics_preserve_meaning() {
+        let mut turn = sample_turn_result();
+        turn.errors.push(
+            serde_json::from_value(json!({
+                "severity": "advisory", "kind": "attachment", "message": "Attachment omitted"
+            }))
+            .unwrap(),
+        );
+        assert_eq!(
+            crate::util::turn_diagnostic_lines(&turn),
+            ["warning: Attachment omitted"]
+        );
+        assert_eq!(json_finish_record(1, None, &turn, false)["ok"], true);
+        turn.outcome = TurnOutcome::Stopped(TurnStop::RuntimeError);
+        turn.failure_evidence.push(
+            serde_json::from_value(json!({
+                "partial_output": {"residency": "complete", "text": "PRIVATE PARTIAL"},
+                "billed_usage": {"input_tokens": 0, "output_tokens": 0,
+                    "cache_read_input_tokens": 0, "cache_write_input_tokens": 0,
+                    "reasoning_output_tokens": 0},
+                "refusal": {"code": "charge_safety_guarantee_required",
+                    "denial_reason": "guarantee_required", "protocol_position": "output_started",
+                    "attempt_number": 1, "attempt_count": 1}
+            }))
+            .unwrap(),
+        );
+        let lines = crate::util::turn_diagnostic_lines(&turn).join("\n");
+        assert!(lines.contains("charge_safety_guarantee_required"));
+        assert!(lines.contains("defaulted"));
+        assert!(lines.contains("partial output present"));
+        assert!(!lines.contains("PRIVATE PARTIAL"));
+        turn.failure_evidence[0].billed_usage.input_tokens = 7;
+        turn.failure_evidence[0].billed_usage.output_tokens = 3;
+        turn.failure_evidence[0].partial_output = None;
+        let lines = crate::util::turn_diagnostic_lines(&turn).join("\n");
+        assert!(lines.contains("billed tokens 10; partial output absent"));
     }
 
     #[test]

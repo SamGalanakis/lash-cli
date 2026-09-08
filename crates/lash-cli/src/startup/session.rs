@@ -348,7 +348,7 @@ impl CliSessionOpener {
             anyhow::anyhow!("could not open session with RLM dialect `{requested}`: {error}")
         })?;
         if let Some(requested) = host_config.rlm_dialect {
-            let recorded = session.rlm_config().dialect.unwrap_or_default();
+            let recorded = session.rlm_config()?.dialect.unwrap_or_default();
             if recorded != requested {
                 anyhow::bail!(
                     "RLM dialect conflict: session records `{}`, requested `{}`",

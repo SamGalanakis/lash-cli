@@ -364,3 +364,25 @@ fn plugin_runtime_maps_plan_process_status_event() {
     );
     assert!(turn.transient_until.is_some());
 }
+
+#[test]
+fn cell_failure_renders_kind_and_message() {
+    let mut app = app();
+    app.handle_turn_activity(activity(
+        "cell",
+        TurnEvent::CodeBlockCompleted {
+            language: "lashlang".into(),
+            output: String::new(),
+            error: Some(lash::plugins::CellFailure {
+                kind: lash::plugins::CellFailureKind::Policy,
+                message: "not allowed".into(),
+            }),
+            success: false,
+            duration_ms: 1,
+            tool_call_ids: Vec::new(),
+            graph_key: None,
+        },
+    ));
+    assert!(app.timeline.iter().any(|item| matches!(item,
+        UiTimelineItem::Error(message) if message == "Policy: not allowed")));
+}

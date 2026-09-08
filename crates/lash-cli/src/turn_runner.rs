@@ -104,10 +104,9 @@ pub(crate) fn spawn_session_turn(
         let target_sink = ActiveTurnTargetSink::new(stream_id, app_tx);
         tracing::debug!(stream_id, "runtime turn task spawned");
         let result = match async {
-            let turn_id = format!("cli-turn:{stream_id}");
+            // Stream IDs restart on CLI launch; let Lash mint durable turn identity.
             task_session
                 .turn(turn_input)
-                .turn_id(turn_id)
                 .cancel(task_cancel)
                 .stream_to(&target_sink)
                 .await
@@ -146,10 +145,10 @@ pub(crate) fn spawn_session_queued_turn(
         let target_sink = ActiveTurnTargetSink::new(stream_id, app_tx);
         tracing::debug!(stream_id, "queued runtime turn task spawned");
         let result = match async {
-            let drain_id = format!("cli-queue-drain:{stream_id}");
             task_session
                 .queued_turn()
-                .drain_id(drain_id)
+                // Keep the host-owned drain label without reusing a stream counter.
+                .drain_id(format!("cli-queue-drain:{}", uuid::Uuid::new_v4()))
                 .cancel(task_cancel)
                 .stream_to(&target_sink)
                 .await
@@ -229,8 +228,11 @@ async fn runtime_error_turn_result(session: &LashSession, message: String) -> la
         usage: TokenUsage::default(),
         children_usage: Vec::new(),
         llm_calls: Vec::new(),
+        failure_evidence: Vec::new(),
+        omitted: None,
         tool_calls: Vec::new(),
         errors: vec![TurnIssue {
+            severity: lash::turn::TurnIssueSeverity::Blocking,
             kind: "runtime".to_string(),
             code: Some(message.clone()),
             terminal_reason: None,
@@ -322,16 +324,69 @@ mod tests {
                 lash::persistence::QueuedWorkBatchDraft::new(
                     session_id,
                     lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-                    vec![lash::persistence::QueuedWorkPayload::agent_frame_task(
+                    lash::persistence::TurnWorkPayload::agent_frame_task(
                         lash::testing::frame_node_id(session_id, source_key),
                         task,
                         None,
-                    )],
+                    ),
                 )
                 .with_source_key(source_key),
             )
             .await
             .expect("enqueue selected queued work")
+    }
+
+    #[tokio::test]
+    async fn catalog_refresh_leaves_pending_input_and_unrelated_work_untouched() {
+        let provider = lash::testing::TestProvider::builder()
+            .complete(|_| async { panic!("catalog refresh must never call the model") })
+            .build()
+            .into_handle();
+        let (core, store_factory) = queued_cancel_test_core(provider);
+        let session = core.session("catalog-refresh").open().await.unwrap();
+        let pending = session
+            .enqueue(TurnInput::text("pending user prompt"))
+            .id("pending-user")
+            .send()
+            .await
+            .unwrap();
+        crate::startup::session::refresh_tool_catalog_and_wait(&session, "test", "catalog-only")
+            .await
+            .unwrap();
+        assert!(session.queued_work().await.unwrap().is_empty());
+        assert_eq!(
+            session.pending_turn_inputs().await.unwrap()[0].input_id,
+            pending.input_id
+        );
+        let unrelated = enqueue_selected_task(
+            &store_factory,
+            &session.session_id(),
+            "unrelated-work",
+            "do not execute".into(),
+        )
+        .await;
+        let error = crate::startup::session::refresh_tool_catalog_and_wait(
+            &session,
+            "test",
+            "blocked-catalog",
+        )
+        .await
+        .expect_err("unclaimable selection must fail closed");
+        assert!(matches!(
+            error.downcast_ref::<lash::EmbedError>(),
+            Some(lash::EmbedError::SelectedQueuedWorkDrainRefused { .. })
+        ));
+        let remaining = session.queued_work().await.unwrap();
+        assert_eq!(remaining.len(), 2);
+        assert!(
+            remaining
+                .iter()
+                .any(|batch| batch.batch_id == unrelated.batch_id)
+        );
+        let remaining_inputs = session.pending_turn_inputs().await.unwrap();
+        assert_eq!(remaining_inputs.len(), 1);
+        assert_eq!(remaining_inputs[0].input_id, pending.input_id);
+        assert_eq!(session.read_view().turn_index(), 0);
     }
 
     #[tokio::test]
@@ -359,7 +414,6 @@ mod tests {
         );
 
         let turn_id = observed_turn_target(&mut event_pump, 5).await;
-        assert_eq!(turn_id, "cli-turn:5");
         let receipt = session
             .request_turn_cancel(
                 &turn_id,

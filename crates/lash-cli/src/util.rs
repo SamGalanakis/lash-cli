@@ -66,6 +66,59 @@ pub fn is_cancelled_error(message: &str, code: Option<&str>) -> bool {
     )
 }
 
+/// Compact settlement diagnostics shared by terminal modes. Evidence usage has
+/// no presence marker upstream: a zero value may be reported or defaulted.
+pub(crate) fn turn_diagnostic_lines(turn: &lash::TurnReport) -> Vec<String> {
+    let mut lines: Vec<_> = turn
+        .errors
+        .iter()
+        .map(|issue| {
+            let label = match issue.severity {
+                lash::turn::TurnIssueSeverity::Advisory => "warning",
+                lash::turn::TurnIssueSeverity::Blocking => "error",
+            };
+            format!("{label}: {}", issue.message)
+        })
+        .collect();
+    if matches!(turn.outcome, lash::TurnOutcome::Stopped(_)) {
+        for evidence in &turn.failure_evidence {
+            let usage = &evidence.billed_usage;
+            let tokens = [
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_read_input_tokens,
+                usage.cache_write_input_tokens,
+            ]
+            .into_iter()
+            .fold(0u64, |sum, value| sum.saturating_add(value.max(0) as u64));
+            let usage_label = if tokens == 0 {
+                "0 (reported or defaulted; usage may be unavailable)".to_string()
+            } else {
+                tokens.to_string()
+            };
+            lines.push(format!(
+                "{}: billed tokens {}; partial output {}",
+                evidence.refusal.code,
+                usage_label,
+                if evidence.partial_output.is_some() {
+                    "present"
+                } else {
+                    "absent"
+                }
+            ));
+        }
+    }
+    if let Some(omitted) = &turn.omitted {
+        lines.push(format!(
+            "Tool records omitted: {} ({} failures, {} attachments)",
+            omitted.count,
+            omitted.failures,
+            omitted.attachments.len()
+        ));
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::{format_duration_ms, format_duration_ms_if_visible};

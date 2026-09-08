@@ -74,7 +74,7 @@ pub fn process_lines_snapshot(app: &App, _frame_width: u16) -> Option<Vec<Line<'
         theme::text_faint_style().add_modifier(Modifier::Dim),
     )]));
     for task in &app.processes {
-        let selected = app.selected_process_id.as_deref() == Some(task.process_id.as_str());
+        let selected = app.selected_process_ref.as_ref() == Some(&task.key());
         let state = match task.status {
             lash::process::ProcessStatus::Completed => "success",
             lash::process::ProcessStatus::Failed => "error",

@@ -297,7 +297,14 @@ mod tests {
 
     use super::*;
 
-    fn runtime_builder(store_root: &Path, trace_path: &Path) -> lash::LashCoreBuilder {
+    async fn runtime_builder(store_root: &Path, trace_path: &Path) -> lash::LashCoreBuilder {
+        std::fs::create_dir_all(store_root).expect("store root");
+        let registry_path = store_root.join("processes.db");
+        let registry = Arc::new(
+            lash_sqlite_store::SqliteProcessRegistry::open(&registry_path, store_root)
+                .await
+                .expect("process registry"),
+        );
         let provider = lash::testing::TestProvider::builder()
             .kind("lash-export-fixture")
             .complete(|_request| async move {
@@ -321,7 +328,10 @@ mod tests {
                     .build()
                     .expect("valid fixture model"),
             )
-            .store_factory(Arc::new(SqliteSessionStoreFactory::new(store_root)))
+            .store_factory(Arc::new(
+                SqliteSessionStoreFactory::new_with_process_registry(store_root, registry_path),
+            ))
+            .process_registry(registry)
             .effect_host(Arc::new(lash::durability::NativeEffectHost::default()))
             .attachment_store(Arc::new(lash::persistence::InMemoryAttachmentStore::new()))
             .process_env_store(Arc::new(
@@ -339,6 +349,7 @@ mod tests {
         let store_root = temp.path().join("sessions");
         let trace_path = temp.path().join("trace.jsonl");
         let core = runtime_builder(&store_root, &trace_path)
+            .await
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "lash-export-test",
                 "lash-export-test:boot",

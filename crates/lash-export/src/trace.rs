@@ -297,7 +297,6 @@ mod tests {
             model: "gpt-5.5".to_string(),
             model_variant: Some("high".to_string()),
             messages,
-            attachments: Vec::new(),
             tools: Vec::new(),
             tool_choice: "auto".to_string(),
             output_spec: None,
@@ -345,6 +344,7 @@ mod tests {
             },
             TraceEvent::LlmCallCompleted {
                 response: TraceLlmResponse {
+                    request_model: "gpt-5.5".to_string(),
                     text: "ok".to_string(),
                     duration_ms: 1234,
                     terminal_reason: None,
@@ -471,6 +471,7 @@ mod tests {
                 },
                 TraceEvent::LlmCallCompleted {
                     response: TraceLlmResponse {
+                        request_model: "gpt-5.5".to_string(),
                         text: "ok".to_string(),
                         duration_ms: 1,
                         terminal_reason: None,

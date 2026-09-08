@@ -116,6 +116,7 @@ impl Row {
             cache_control: self.cache_control,
             stream_termination: None,
             sampling: Default::default(),
+            ..Default::default()
         }
     }
 }
@@ -344,24 +345,167 @@ fn builtin_capability_override(_kind: &str, _model: &str) -> Option<ModelCapabil
     None
 }
 
-/// Resolve the host-supplied capability for a model on a provider kind. Built-in
-/// overrides win; then the first matching pattern row; no match yields
-/// [`ModelCapability::default`] (no known capabilities).
+/// Resolve host-supplied capabilities for a model and provider. Reasoning
+/// overrides win over the first matching pattern row. Known model families
+/// also retain the adapter attachment snapshot; unknown models stay empty.
 pub(crate) fn capability_for(kind: &str, model: &str) -> ModelCapability {
     if let Some(override_capability) = builtin_capability_override(kind, model) {
         return override_capability;
     }
     let full = model.to_lowercase();
     let bare = full.rsplit('/').next().unwrap_or(&full);
-    ROWS.iter()
+    let mut capability = ROWS
+        .iter()
         .find(|row| row.kind == kind && row.rule.matches(&full, bare))
         .map(Row::to_capability)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let known_attachment_model = match kind {
+        "openai" | "codex" => bare.starts_with("gpt-"),
+        "anthropic" => bare.starts_with("claude-"),
+        "google_oauth" => bare.starts_with("gemini-"),
+        "openai-compatible" => ["gpt-", "claude-", "gemini-"]
+            .iter()
+            .any(|prefix| bare.starts_with(prefix)),
+        _ => false,
+    };
+    if capability.reasoning.is_some() || known_attachment_model {
+        capability.attachment_acceptance = attachment_capability();
+    }
+    if kind == "google_oauth" {
+        capability.google_dialect = if bare.starts_with("gemini-3") {
+            lash::provider::GoogleDialect::Gemini3
+        } else if bare.starts_with("claude") {
+            lash::provider::GoogleDialect::ClaudeOnVertex
+        } else {
+            lash::provider::GoogleDialect::Legacy
+        };
+    }
+    capability
+}
+
+/// Host-owned snapshot of the adapter formats at the pinned runtime revision.
+/// Admission and diagnostics both consume this snapshot; there is no separate
+/// UI acceptance table. Keep the prior adapter rules when upgrading the pin.
+fn attachment_capability() -> std::sync::Arc<lash::provider::AttachmentCapabilitySnapshot> {
+    use lash::provider::{
+        AttachmentAcceptanceRule as Rule, AttachmentAcceptor, AttachmentCapabilitySnapshot,
+        AttachmentMimeSource as Source,
+    };
+    static SNAPSHOT: std::sync::OnceLock<std::sync::Arc<AttachmentCapabilitySnapshot>> =
+        std::sync::OnceLock::new();
+    SNAPSHOT
+        .get_or_init(|| {
+            let images = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+            let responses = [
+                "image/jpeg",
+                "image/png",
+                "image/gif",
+                "image/webp",
+                "application/pdf",
+                "application/json",
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-powerpoint",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "text/csv",
+                "text/html",
+                "text/markdown",
+                "text/plain",
+            ];
+            let mut acceptors = Vec::new();
+            for (provider, types, families, urls, file_providers) in [
+                (
+                    "OpenAI Responses",
+                    responses.as_slice(),
+                    &[][..],
+                    true,
+                    &["openai"][..],
+                ),
+                (
+                    "OpenAI Chat Completions",
+                    images.as_slice(),
+                    &[][..],
+                    true,
+                    &[][..],
+                ),
+                (
+                    "Anthropic Messages",
+                    &[
+                        "image/jpeg",
+                        "image/png",
+                        "image/gif",
+                        "image/webp",
+                        "application/pdf",
+                    ][..],
+                    &[][..],
+                    true,
+                    &["anthropic"][..],
+                ),
+                (
+                    "Google Gemini",
+                    &[
+                        "image/jpeg",
+                        "image/png",
+                        "image/webp",
+                        "image/heic",
+                        "image/heif",
+                        "application/pdf",
+                    ][..],
+                    &["audio", "text", "video"][..],
+                    false,
+                    &["google", "google_oauth", "gemini"][..],
+                ),
+            ] {
+                let mut sources = vec![Source::Inline, Source::Stored];
+                if urls {
+                    sources.push(Source::ExternalUrl);
+                }
+                let mut rules: Vec<_> = sources
+                    .into_iter()
+                    .map(|source| Rule::Mime {
+                        source,
+                        media_types: types.iter().map(|s| (*s).to_string()).collect(),
+                        media_families: families.iter().map(|s| (*s).to_string()).collect(),
+                    })
+                    .collect();
+                rules.extend(file_providers.iter().map(|provider| Rule::ProviderFile {
+                    provider: (*provider).to_string(),
+                }));
+                acceptors.push(AttachmentAcceptor {
+                    provider: provider.to_string(),
+                    rules,
+                });
+            }
+            AttachmentCapabilitySnapshot {
+                revision: "lash-cli-46dfed8-attachments-1".into(),
+                acceptors,
+            }
+            .into()
+        })
+        .clone()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attachment_snapshot_retains_adapter_formats_and_google_dialect() {
+        let cap = capability_for("openai", "gpt-5.4");
+        let snapshot = &cap.attachment_acceptance;
+        let source: lash::direct::AttachmentSource = serde_json::from_value(serde_json::json!({
+            "source": "inline", "media_type": "image/png", "bytes": [1, 2, 3]
+        }))
+        .unwrap();
+        assert!(snapshot.accepts("OpenAI Responses", &source));
+        assert!(snapshot.accepts("OpenAI Chat Completions", &source));
+        assert_eq!(
+            capability_for("google_oauth", "gemini-3.1-pro-preview").google_dialect,
+            lash::provider::GoogleDialect::Gemini3
+        );
+    }
 
     fn efforts(cap: &ModelCapability) -> Vec<String> {
         cap.reasoning

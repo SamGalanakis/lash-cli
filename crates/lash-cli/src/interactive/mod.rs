@@ -525,6 +525,9 @@ pub(crate) async fn run_app(
                     }
 
                     app.finish_turn_from_read_view(&read_view);
+                    for line in crate::util::turn_diagnostic_lines(&done.result) {
+                        push_system_message(&mut app, line);
+                    }
                     app.clear_manual_interrupt_requested();
                     runtime_return_rx = None;
                     cancel_token = None;
