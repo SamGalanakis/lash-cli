@@ -460,6 +460,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
     session_policy.provider_id = active_provider.kind().to_string();
     session_policy.session_id = run_session_id.clone();
     session_policy.autonomous = autonomous;
+    session_policy.charge_safety = lash_config.charge_safety.clone();
     session_policy.no_progress_budget = crate::host_policy::no_progress_budget();
     session_policy.prompt = prompt_layer.clone();
     let tavily_key = lash_config.tavily_api_key().unwrap_or_default().to_string();
@@ -562,6 +563,7 @@ pub(crate) async fn run(args: Args) -> anyhow::Result<()> {
         trace_path,
         trace_level,
         !autonomous,
+        lash_config.charge_safety.clone(),
     );
     let session_bootstrap =
         session_bootstrap.expect("session bootstrap is opened for every non --info run");

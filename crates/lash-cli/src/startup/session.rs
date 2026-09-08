@@ -84,6 +84,7 @@ pub(crate) struct CliSessionOpener {
     trace_jsonl_path: Option<PathBuf>,
     trace_level: lash::tracing::TraceLevel,
     owns_visible_queued_turns: bool,
+    charge_safety: lash::ChargeSafetyPolicy,
     opened_cores: Arc<tokio::sync::Mutex<Vec<LashCore>>>,
 }
 
@@ -163,6 +164,7 @@ impl CliSessionOpener {
         trace_jsonl_path: Option<PathBuf>,
         trace_level: lash::tracing::TraceLevel,
         owns_visible_queued_turns: bool,
+        charge_safety: lash::ChargeSafetyPolicy,
     ) -> Self {
         Self {
             plugin_stack,
@@ -173,6 +175,7 @@ impl CliSessionOpener {
             trace_jsonl_path,
             trace_level,
             owns_visible_queued_turns,
+            charge_safety,
             opened_cores: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         }
     }
@@ -296,6 +299,7 @@ impl CliSessionOpener {
             }
         };
         let mut builder = builder
+            .charge_safety(self.charge_safety.clone())
             .provider(self.provider.clone())
             .model(fallback_policy.model.clone())
             .no_progress_budget(crate::host_policy::no_progress_budget())
@@ -338,6 +342,7 @@ impl CliSessionOpener {
         }
 
         let session_spec = SessionSpec::new()
+            .charge_safety(self.charge_safety.clone())
             .provider_id(fallback_policy.provider_id.clone())
             .model(fallback_policy.model.clone())
             .turn_budget(crate::host_policy::turn_budget())
