@@ -53,7 +53,6 @@ lash = { package = "lash-runtime", git = "https://github.com/Ascending-AI/lash.g
 lash-lashlang-runtime = { package = "lash-internal-lashlang-runtime", git = "https://github.com/Ascending-AI/lash.git", rev = "46dfed8ea406738588cb6a170a1d6825154267cd" }
 lash-llm-tools = { package = "lash-internal-llm-tools", git = "https://github.com/Ascending-AI/lash.git", rev = "46dfed8ea406738588cb6a170a1d6825154267cd" }
 lash-plugin-mcp = { package = "lash-internal-plugin-mcp", git = "https://github.com/Ascending-AI/lash.git", rev = "46dfed8ea406738588cb6a170a1d6825154267cd" }
-# lash-plugin-plan-mode removed upstream
 lash-plugin-process-controls = { package = "lash-internal-plugin-process-controls", git = "https://github.com/Ascending-AI/lash.git", rev = "46dfed8ea406738588cb6a170a1d6825154267cd" }
 lash-protocol-rlm = { package = "lash-internal-protocol-rlm", git = "https://github.com/Ascending-AI/lash.git", rev = "46dfed8ea406738588cb6a170a1d6825154267cd" }
 lash-protocol-standard = { package = "lash-internal-protocol-standard", git = "https://github.com/Ascending-AI/lash.git", rev = "46dfed8ea406738588cb6a170a1d6825154267cd" }

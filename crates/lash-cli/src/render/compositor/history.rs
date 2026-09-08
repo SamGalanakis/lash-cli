@@ -77,24 +77,6 @@ fn draw_history(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
             frame.write_line(area.x, base_y + written_rows as u16, line, area.width);
             written_rows += 1;
         }
-        // Advance skip_lines past the live markdown content rows so a
-        // trailing plan-dock render picks up at the right offset.
-        skip_lines = skip_lines.saturating_sub(live_lines.len());
-    }
-
-    // Plan checklist renders at the logical tail of history — part of
-    // the scroll, not a pinned dock. Appears just after the live-
-    // assistant trace so new turns push it down the transcript.
-    if written_rows < row_budget
-        && let Some(plan_lines) = render::plan_dock_lines_snapshot(app, area.width)
-    {
-        for line in plan_lines.iter().skip(skip_lines) {
-            if written_rows >= row_budget {
-                break;
-            }
-            frame.write_line(area.x, base_y + written_rows as u16, line, area.width);
-            written_rows += 1;
-        }
     }
 
     if let Some((x, y, height)) = render::history_scroll_indicator(app, area) {
@@ -107,7 +89,6 @@ fn draw_history(frame: &mut Frame<'_>, app: &mut App, area: Rect) {
         && app.live_tool_output_anchor_block_index().is_none()
         && !app.live.reasoning.has_renderable_output()
         && !app.live.assistant.has_renderable_output()
-        && app.plan_dock.as_ref().is_none_or(|plan| plan.is_empty())
     {
         draw_empty_history_state(frame, app, area);
     }

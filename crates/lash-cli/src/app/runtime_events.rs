@@ -454,33 +454,9 @@ impl App {
             // Lash owns child aggregation. The completed `TurnReport` and
             // `LashSession::usage_report` refresh the UI from canonical data.
             TurnEvent::ChildUsage { .. } => {}
-            TurnEvent::PluginRuntime { plugin_id, event } => {
+            TurnEvent::PluginRuntime { event, .. } => {
                 if let Some((status, detail, duration)) = runtime_status_from_plugin_event(&event) {
                     self.set_transient_status(status, detail, duration);
-                    self.dirty = true;
-                }
-                let renders_visible_output =
-                    crate::plugin_surface::event_renders_visible_output(&event);
-                let mutation = crate::plugin_surface::apply_surface_event(
-                    &mut self.timeline,
-                    &mut self.plugin_mode_indicators,
-                    &self.plan_dock,
-                    &plugin_id,
-                    event,
-                );
-                if mutation.blocks_changed {
-                    self.invalidate_height_cache();
-                    if renders_visible_output {
-                        self.mark_visible_output();
-                    }
-                    self.scroll_to_bottom();
-                }
-                if mutation.indicators_changed {
-                    self.dirty = true;
-                }
-                if let Some(next_dock) = mutation.plan_dock_change {
-                    self.plan_dock = next_dock.filter(|state| !state.is_empty());
-                    self.invalidate_height_cache();
                     self.dirty = true;
                 }
             }

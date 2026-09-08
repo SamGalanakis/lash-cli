@@ -25,7 +25,6 @@ mod model_catalog;
 mod model_selection;
 mod overlay;
 mod paths;
-mod plan_plugin;
 mod plugin_surface;
 mod prompt_context_plugin;
 mod prompt_model;

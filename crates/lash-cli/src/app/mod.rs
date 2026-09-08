@@ -79,42 +79,6 @@ pub struct PluginPanelBlock {
     pub content: String,
 }
 
-/// One row in the sticky plan dock. `status` drives the glyph + color:
-/// `✓` lichen for `Done`, `■` sodium for `Active` (at most one), `□`
-/// chalk-dim for `Pending`.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PlanDockItem {
-    pub text: String,
-    pub status: PlanDockItemStatus,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlanDockItemStatus {
-    Done,
-    Active,
-    Pending,
-}
-
-/// The persistent plan companion rendered at the bottom of the TUI
-/// frame. Populated by the `plan_mode` plugin's panel events and
-/// cleared when the plan is dismissed. See `docs/design-language.html`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PlanDockState {
-    pub title: String,
-    /// Optional meta line shown alongside the title (e.g. `3m 3s · ↓ 1.7k tokens · thinking`).
-    /// Rendered in ash-text next to the title.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<String>,
-    pub items: Vec<PlanDockItem>,
-}
-
-impl PlanDockState {
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty() && self.title.trim().is_empty()
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToastKind {
     Info,
@@ -652,10 +616,6 @@ pub struct App {
     pub repo_status: Option<RepoStatus>,
     /// Active plugin-owned mode indicators rendered in the input chrome.
     pub plugin_mode_indicators: BTreeMap<String, String>,
-    /// Active plan surfaced by the `plan_mode` plugin. When present it
-    /// renders as a sticky dock between the history viewport and the
-    /// input row instead of as an inline panel in the scroll.
-    pub plan_dock: Option<PlanDockState>,
     /// Snapshot of processes registered for this session.
     pub processes: Vec<ProcessView>,
     /// Focused background process row in the trailing process dock.
@@ -935,7 +895,6 @@ impl App {
                 .ok()
                 .and_then(|cwd| crate::repo_status::detect_repo_status(&cwd)),
             plugin_mode_indicators: BTreeMap::new(),
-            plan_dock: None,
             processes: Vec::new(),
             selected_process_ref: None,
             ui_extensions: Arc::new(TuiExtensions::default()),

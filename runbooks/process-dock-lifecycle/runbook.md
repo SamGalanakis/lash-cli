@@ -130,8 +130,8 @@ screen 18
 
 Gate: no `Background` dock, and `Tab` opens no process overview (the dock-focus binding —
 `docs/index.html`: "With an empty prompt, cycle focus through the dock of background
-processes" — falls through when the dock is empty; note that `Shift+Tab` here falls through
-to the plan-mode toggle, further evidence there is no dock to cycle). The process **cancel**
+processes" — falls through when the dock is empty; `Shift+Tab` also falls through when
+there is no dock to cycle). The process **cancel**
 (`Delete`) and **overview** (`Enter`) rungs cannot be exercised — no process exists to
 focus. Record this as the harness gap. Then `lash-exit 10`.
 
