@@ -225,7 +225,7 @@ pub(super) async fn handle_input_mode_key(
             show_selected_process_overview(ctx.app);
         }
         KeyCode::Delete if process_dock_has_focus(ctx.app) => {
-            cancel_selected_process(ctx.app, ctx.runtime).await;
+            cancel_selected_process(ctx.app, ctx.runtime, ctx.runtime_factory).await;
         }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             ctx.app.editor.kill_to_line_start();

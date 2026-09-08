@@ -43,7 +43,7 @@ pub(crate) use self::projection::{
 };
 pub(crate) use self::queues::turn_input_display_text;
 
-const PROCESS_RETENTION: std::time::Duration = std::time::Duration::from_secs(10);
+pub(crate) const PROCESS_RETENTION: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub(crate) struct ProcessSnapshot {
     pub view: ProcessHandleView,

@@ -216,14 +216,17 @@ struct UiSnapshotRequest {
 }
 
 impl UiSnapshotWorker {
-    pub(super) fn spawn(app_tx: AppEventTx) -> Self {
+    pub(super) fn spawn(
+        app_tx: AppEventTx,
+        runtime_factory: crate::startup::session::CliSessionOpener,
+    ) -> Self {
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<UiSnapshotRequest>();
         tokio::spawn(async move {
             while let Some(request) = request_rx.recv().await {
                 let started = std::time::Instant::now();
                 let snapshot = tokio::time::timeout(
                     std::time::Duration::from_millis(200),
-                    collect_ui_snapshot(request.session.clone()),
+                    collect_ui_snapshot(request.session.clone(), &runtime_factory),
                 )
                 .await;
                 let result = match snapshot {

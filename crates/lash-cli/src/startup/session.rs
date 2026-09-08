@@ -195,6 +195,24 @@ impl CliSessionOpener {
             .ok_or_else(|| anyhow::anyhow!("no Lash core is open"))
     }
 
+    pub(crate) async fn list_dock_processes(
+        &self,
+        session: &LashSession,
+    ) -> Result<Vec<lash::process::ObservedProcess>> {
+        let core = self.active_core().await?;
+        let session_scope = session.observe().process_scope();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis() as u64);
+        Ok(core
+            .processes()
+            .list_observed_by(
+                &session_scope,
+                &crate::ui_effects::process_dock_filter(now_ms),
+            )
+            .await?)
+    }
+
     pub(crate) async fn list_recent_sessions(
         &self,
         limit: usize,
