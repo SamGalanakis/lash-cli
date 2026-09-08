@@ -10,7 +10,7 @@
 reflects the session's durable process registry (`session.processes().list()`). A subagent
 spawn is a durable Runtime Process and therefore renders in two places: inline tool
 activity (`◆ spawn subagent · …`, footer `Running tool · spawn_agent`) and a transient dock
-row (`Background`, `◆ running · subagent · spawn`). Its durable record in
+row (`Background`, `◆ running · subagent · spawn` or `◆ success · subagent · spawn`). Its durable record in
 `store/processes.db` moves from `process.first_started` to `process.completed`, carries an
 observer edge to the parent session, and the settled dock row is pruned after the short
 retention window.
@@ -74,49 +74,74 @@ confirm the deterministic provider and idle prompt.
 `--lash-home $LH` so its process store can be checked immediately after settlement.
 
 ```
+clear
 type Does your subagent tool work
 key enter
 expect 15 Running tool · spawn_agent
+expect 15 ◆ spawn subagent
 expect 15 Background
-expect 15 ◆ running · subagent · spawn
-clear
+expect-re 15 ◆ (running|success) · subagent · spawn
 expect 45 ■ subagent-ok
+expect 10 Idle
 screen 40
 ```
 
-Gate: the spawn shows as `◆ spawn subagent · …`, the footer passes through `Running tool ·
-spawn_agent`, and the live process projection renders `Background` with `◆ running ·
-subagent · spawn`. Keep the `clear` after the running-tool gates so `■ subagent-ok` must
-come from a fresh settled frame. In that settled `screen`, the transient `Background` row
-is absent after its retention window.
+Gate: the spawn shows as `◆ spawn subagent · …`, the footer passes through
+`Running tool · spawn_agent`, and the process projection renders `Background` with
+`◆ running · subagent · spawn` or `◆ success · subagent · spawn`. The dock polls a
+bounded observer read roughly every 250 ms; this sub-second scenario may complete
+before its first snapshot. A terminal success row is therefore valid admission
+visibility; the mandatory SQLite lifecycle check below still proves first-start and
+completion. Error/cancelled/abandoned rows do not satisfy the gate.
+
+Clear **before submission**, not between the dock and assistant gates: settlement can
+precede the dock snapshot, and an unchanged settled row is not re-emitted on demand.
+`■ subagent-ok` must be an assistant row, never the tool's quoted task or a preview.
+The completed dock row is retained for 10 seconds; immediate absence is not expected.
 
 Before `lash-exit`, cross-check the fixed home's process store from a second shell:
 
 ```
 sqlite3 -header -column "$LH/store/processes.db" "
-SELECT process_id, identity_kind, identity_label, status
+SELECT process_id, incarnation, identity_kind, identity_label, status
 FROM processes
 WHERE identity_kind = 'subagent' AND identity_label = 'spawn';
-SELECT sequence, event_type
-FROM process_events
-WHERE process_id = (
-  SELECT process_id FROM processes
-  WHERE identity_kind = 'subagent' AND identity_label = 'spawn'
-)
-AND event_type IN ('process.first_started', 'process.completed')
-ORDER BY sequence;
-SELECT session_id, process_id
-FROM process_observers
-WHERE process_id = (
-  SELECT process_id FROM processes
-  WHERE identity_kind = 'subagent' AND identity_label = 'spawn'
-);"
+SELECT e.sequence, e.event_type
+FROM process_events e
+JOIN processes p ON p.process_id = e.process_id
+ AND p.incarnation = e.process_incarnation
+WHERE p.identity_kind = 'subagent' AND p.identity_label = 'spawn'
+AND e.event_type IN ('process.first_started', 'process.completed')
+ORDER BY e.sequence;
+SELECT o.session_id, o.process_id, o.process_incarnation
+FROM process_observers o
+JOIN processes p ON p.process_id = o.process_id
+ AND p.incarnation = o.process_incarnation
+WHERE p.identity_kind = 'subagent' AND p.identity_label = 'spawn';"
 ```
 
 Gate: exactly one process row reports `subagent`, `spawn`, and `completed`; exactly two
 selected lifecycle rows appear in order, `process.first_started` then `process.completed`;
-and exactly one observer row links that process id to the parent session. Then
-`lash-exit 10`.
+and exactly one observer row links that process id **and incarnation** to the parent
+session (cross-check the root session in the fixed home's catalog).
+
+**Retention pruning.** Dispatch the SQLite cross-check promptly on settlement, then:
+
+```
+clear
+expect 15 ❯ Message · / for commands
+screen 40
+lash-exit 10
+```
+
+With no further input, removing the dock after its 10-second retention window changes
+the input layout and re-emits the editor row. Gate that repaint, then inspect the fresh
+capture and final trace snapshot: no `Background` header or subagent dock row remains.
+An unchanged idle placeholder is not a gate on its own: it must follow the previously
+observed dock and its layout removal. Save a trace with render checkpoints (forward
+`--debug-ui-trace-interval-ms 100`) to corroborate the visible dock and final absence.
+A timeout or a dock still present is Abort/RCA. Never insert a retention sleep or accept
+absence in an empty capture as proof.
 
 **Empty dock has nothing to focus.** Relaunch `--scenario standard-echo`. With an idle empty
 prompt and no processes, the dock-focus keys have no target:
@@ -168,9 +193,9 @@ tokens — deliberate).
 
 | Item | Objective gate | Verdict | Notes |
 |------|----------------|---------|-------|
-| Subagent renders on both surfaces | `◆ spawn subagent` + `Running tool · spawn_agent` + `Background` / `◆ running · subagent · spawn`, then post-`clear` `■ subagent-ok` |  |  |
+| Subagent renders on both surfaces | `◆ spawn subagent` + `Running tool · spawn_agent` + `Background` / `◆ running · subagent · spawn` or `◆ success · subagent · spawn`, then `■ subagent-ok` from the pre-submission-cleared capture |  |  |
 | Durable subagent lifecycle | one `subagent / spawn / completed` process row; `process.first_started → process.completed`; one parent-session observer edge |  |  |
-| Transient row is pruned | settled post-`clear` screen has no `Background` row |  |  |
+| Transient row is pruned | after the 10-second retention window, layout repaint + fresh screen and final snapshot have no `Background` row |  |  |
 | Empty dock has no focus target | `Tab` opens no overview; no `Background` header |  |  |
 | Dock process visible *(real only)* | `Background` row `◆ running · … `; process store row |  |  |
 | Cancel path *(real only)* | `running → cancelled`; terminal state in store |  |  |

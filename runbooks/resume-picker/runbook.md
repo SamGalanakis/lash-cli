@@ -46,7 +46,7 @@ $LH` against a **clean** `$LH`, confirm the deterministic provider, gate the idl
 ```
 type hello from pty
 key enter
-expect 25 test-provider echo: hello from pty
+expect 25 ■ test-provider echo: hello from pty
 wait 2
 type /clear
 key enter
@@ -115,8 +115,13 @@ direct form reached it.
 **Rigor (contract check on the identifier surface).** CONTEXT.md → "Operator UI" and
 `docs/index.html` present `/resume <id-or-name>` as accepting the session **id or
 human-readable name**. As a rigor case, also drive
-`/resume <B-session-name>` (the `name` shown by `/info`). If it returns `Could not resolve
-session ...`, that is a divergence between the documented identifier surface and the CLI —
+`/resume <B-session-name>` (the `name` shown by `/info`). First `/clear` and gate
+`Started new session` so the rigor case must actually switch sessions and its confirmation
+cannot be an unchanged row from the preceding id lookup. Clear the capture, submit the
+name target, and gate **`Resumed: <B-catalog-id>`**: the confirmation always prints the
+resolved catalog id, not the input alias. Open `/info` and confirm both B's name and id.
+Dismiss it with `Esc`, `clear`, and an action-driven editor-row gate before exit. If the
+name lookup returns `Could not resolve session ...`, that is a divergence between the documented identifier surface and the CLI —
 **report it as a finding** (RCA it to the resume-identifier resolution path), and do **not**
 edit the doc or code to hide it. Catalog-id resolution is the escape-hatch gate; name
 resolution is the rigor case. Legacy per-session database filename targets are intentionally
@@ -133,6 +138,7 @@ type /clear
 key enter
 expect 10 Started new session
 wait 2
+clear
 type /clear
 key enter
 expect 10 Started new session

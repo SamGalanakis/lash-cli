@@ -52,7 +52,7 @@ Optionally add `--trace trace.json` so Phase 2 can cross-check the ingress ops.
 type hello from pty
 expect 5 hello from pty
 key enter
-expect 25 test-provider echo: hello from pty
+expect 25 ■ test-provider echo: hello from pty
 ```
 
 Gates: the draft echoes as a user row `● hello from pty`; the footer walks
@@ -69,7 +69,7 @@ active (blocked in `Thinking`):
 expect 20 Message · / for commands
 type gated initial prompt
 key enter
-expect 20 gated initial prompt
+expect 20 ● gated initial prompt
 expect 15 Thinking
 ```
 
@@ -79,7 +79,7 @@ expect 15 Thinking
 type inject this now
 key enter
 expect 10 ◆ Will send in this turn
-expect 5 inject this now
+expect 5 ↳ inject this now
 ```
 
 **Next Full Turn (Tab, mid-turn):**
@@ -88,7 +88,7 @@ expect 5 inject this now
 type hold for next turn
 key tab
 expect 10 ◇ Queued for next turn
-expect 5 hold for next turn
+expect 5 ↳ hold for next turn
 ```
 
 Objective gate: both sections render above the input, `◆ Will send in this turn` carrying
@@ -108,7 +108,7 @@ active window, then let the first turn commit and watch the queued draft dispatc
 expect 20 Message · / for commands
 type slow initial prompt
 key enter
-expect 10 slow initial prompt
+expect 10 ● slow initial prompt
 type hold for next turn
 key tab
 expect 8 ◇ Queued for next turn
@@ -141,22 +141,24 @@ stalled:
 expect 20 Message · / for commands
 type slow initial prompt
 key enter
-expect 10 slow initial prompt
+expect 10 ● slow initial prompt
 expect 10 Thinking
 type generation fence follow-up
 key enter
 expect 8 ◆ Will send in this turn
-expect 5 generation fence follow-up
+expect 5 ↳ generation fence follow-up
 clear
 expect 25 ■ test-provider echo: slow initial prompt
 expect 20 ● slow initial prompt
 expect 20 ● generation fence follow-up
-clear
-expect 25 ■ test-provider echo: slow initial prompt
 expect 20 Idle
 screen 80
 lash-exit 10
 ```
+
+Keep the capture from the pre-settlement `clear` through the idle gate. The assistant
+row may already be committed when both user-row gates pass; clearing again would demand
+an unchanged row that the differential renderer has no reason to re-emit.
 
 Gates: both `● slow initial prompt` and `● generation fence follow-up` are committed user rows,
 the assistant row `■ test-provider echo: slow initial prompt` commits, and the footer returns to
